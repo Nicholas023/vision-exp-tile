@@ -1,3 +1,5 @@
+**本次更新（v0.1.2）完全由 DeepSeek Harness 自主完成** —— 从问题诊断、代码修复、单元/集成测试、跨场景稳定性验证，到版本打包与发布流程，全部由 DeepSeek Harness 自主执行。
+
 写在前面：这个插件是我用Deepseek Harness写的，我本人没有写代码有关的知识，这个插件只是提供一个思路外加自用。Deepseek-v4-flash-vision-exp发布后由于其会把大图压缩到800*800的特性，为了不丢失图片细节就让Deepseek写了这个插件，各位随意取用，有问题的话可以提交issue（如果能自己改的话就更好了，你提交了issue我也只能给Deepseek看然后让他自己改，我本人尝试过多次均为学会任何写代码的能力，也是乘上ai的东风了让我有了开发插件的能力）
 
 # vision-exp-tile ◆ DeepSeek Harness 大图分块识别插件（为 deepseek-v4-flash-vision-exp 定制）

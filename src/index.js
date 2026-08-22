@@ -621,7 +621,7 @@ export function createRegionCropTool(ctx, cfg) {
     name: tool,
     description: [
       '按矩形裁剪图片的"兴趣点/文字区域"，等比缩放至最长边 800（保比例，如 4:3 → 800×600；max_edge=0 则不缩放 1:1），落盘 PNG；可选择直接调用视觉 API 识别该区域。',
-      '参数：file_path（必填）；rect（必填，[x0,y0,x1,y1]，支持 0..1 相对坐标或原图像素坐标，自动识别）；rotate（0/90/180/270 默认 0）；max_edge（默认 800；0=不缩放）；recognize（默认 true=调用视觉 API 返回区域描述；false=仅落盘 PNG 供本地 OCR 工具处理）；question（可选，识别该区域时的问题）；out_dir（可选，默认系统临时目录）。',
+      '参数：file_path（必填）；rect（必填，[x0,y0,x1,y1]，支持 0..1 相对坐标或原图像素坐标，自动识别）；rotate（0/90/180/270 默认 0）；max_edge（默认 800；0=不缩放）；recognize（默认 true=调用视觉 API 返回区域描述；false=仅落盘 PNG 供本地 OCR 工具处理）；question（可选，识别该区域时的问题）；max_tokens（可选，单次识别输出 token 上限 256..65536，默认取配置 maxTokens）；out_dir（可选，默认系统临时目录）。',
       '返回：区域图路径、输出尺寸、原图裁剪矩形（像素）、（recognize=true 时）区域描述。'
     ].join(' '),
     parameters: {
@@ -632,6 +632,7 @@ export function createRegionCropTool(ctx, cfg) {
         rect: { type: 'array', description: '必填 [x0,y0,x1,y1]：0..1 相对坐标或原图像素坐标。', items: { type: 'number' } },
         rotate: { type: 'integer', enum: [0, 90, 180, 270], description: '裁剪前顺时针旋转角度。默认 0。' },
         max_edge: { type: 'integer', description: '输出最长边（默认 800，保比例；0=不缩放 1:1 供 OCR）。' },
+        max_tokens: { type: 'integer', description: '单次请求输出 token 上限（256..65536）。默认见 config.maxTokens。' },
         recognize: { type: 'boolean', description: 'true=调用视觉 API 返回区域描述（默认）；false=仅落盘供本地 OCR/网格。' },
         question: { type: 'string', description: '识别该区域时的问题（可选）。' },
         out_dir: { type: 'string', description: '区域图输出目录（默认系统临时目录）。' }
@@ -683,6 +684,8 @@ export function createRegionCropTool(ctx, cfg) {
       const recognizeFlag = readBool(args.recognize, true, 'recognize', tool);
       const rotate = readInt(args.rotate, cfg.rotate ?? 0, 0, 270, 'rotate', tool);
       if (![0, 90, 180, 270].includes(rotate)) throw new Error(`${tool}: rotate 仅支持 0/90/180/270`);
+      // 单次请求输出 token 上限（默认 cfg.maxTokens；可经 args.max_tokens 覆盖）
+      const maxTokens = readInt(args.max_tokens, cfg.maxTokens, 256, 65536, 'max_tokens', tool);
 
       const cropped = await cropRegion(img.bytes, img.ext, {
         rect,

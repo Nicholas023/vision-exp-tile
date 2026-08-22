@@ -1,6 +1,6 @@
 {
   "name": "vision-exp-tile",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DSH 插件：大图切 800x800 无损小块（官方缩放甜蜜点）+ 坐标标注 + 分块聚合逻辑，直连 deepseek-v4-flash-vision-exp 识别；仅使用纯官方 DSH 功能，零依赖第三方插件，不统计 token/费用。",
   "type": "module",
   "main": "src/index.js",
@@ -17,7 +17,7 @@
     "cordis.patch.yml"
   ],
   "scripts": {
-    "test": "node --test",
+    "test": "node --test \"tests/**/*.test.js\"",
     "release-pack": "powershell -ExecutionPolicy Bypass -File scripts/release-pack.ps1"
   },
   "keywords": [
