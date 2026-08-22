@@ -1,0 +1,61 @@
+{
+  "name": "vision-exp-tile",
+  "version": "0.1.1",
+  "description": "DSH 插件：大图切 800x800 无损小块（官方缩放甜蜜点）+ 坐标标注 + 分块聚合逻辑，直连 deepseek-v4-flash-vision-exp 识别；仅使用纯官方 DSH 功能，零依赖第三方插件，不统计 token/费用。",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "tests",
+    "scripts",
+    "README.md",
+    "LICENSE",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "release-pack": "powershell -ExecutionPolicy Bypass -File scripts/release-pack.ps1"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "vision",
+    "image-tile",
+    "deepseek-v4-flash-vision-exp",
+    "large-image"
+  ],
+  "license": "MIT",
+  "author": "vision-exp-tile contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/<你的GitHub用户名>/vision-exp-tile.git"
+  },
+  "homepage": "https://github.com/<你的GitHub用户名>/vision-exp-tile#readme",
+  "bugs": {
+    "url": "https://github.com/<你的GitHub用户名>/vision-exp-tile/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-fs": "^0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "dependencies": {
+    "jpeg-js": "^0.4.4",
+    "pngjs": "^7.0.0",
+    "sharp": "^0.35.3"
+  }
+}

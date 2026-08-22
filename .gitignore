@@ -1,0 +1,20 @@
+# 依赖与构建产物（node_modules 由安装者自行安装）
+node_modules/
+*.tgz
+
+# 测试/临时产物
+tmp/
+dist/
+*.log
+.tmp
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# DSH 本地运行痕迹（绝不上传）
+.credentials.yaml
+*.bak-vision-exp-tile
