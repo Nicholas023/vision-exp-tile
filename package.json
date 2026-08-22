@@ -17,7 +17,7 @@
     "cordis.patch.yml"
   ],
   "scripts": {
-    "test": "node --test \"tests/**/*.test.js\"",
+    "test": "node --test",
     "release-pack": "powershell -ExecutionPolicy Bypass -File scripts/release-pack.ps1"
   },
   "keywords": [
