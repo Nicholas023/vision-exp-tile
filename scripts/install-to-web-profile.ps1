@@ -1,4 +1,4 @@
-# install-to-web-profile.ps1 — 测试通过后，把 vision-exp-tile 正式挂载到 web profile
+﻿# install-to-web-profile.ps1 — 测试通过后，把 vision-exp-tile 正式挂载到 web profile
 #
 # 说明：本脚本默认【只准备不执行】（-Apply 参数才真正修改正式 profile）。
 #   1) 备份 profiles/web/package.json → package.json.bak-vision-exp-tile

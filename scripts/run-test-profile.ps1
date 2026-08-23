@@ -1,4 +1,4 @@
-# run-test-profile.ps1 — 隔离测试环境一键脚本（vision-test profile，端口 3081）
+﻿# run-test-profile.ps1 — 隔离测试环境一键脚本（vision-test profile，端口 3081）
 #
 # 作用：
 #   1) 校验/重建 ~/.dsh/profiles/vision-test 与插件 junction（幂等）
