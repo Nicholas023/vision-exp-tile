@@ -28,6 +28,35 @@ import { buildPixelGrid } from './pixelgrid.js';
 const REGION_QUESTION = '详细识别该区域的内容：文字、物体、图表、颜色布局等；有文字则逐字转录。';
 
 /**
+ * 简易并发限流器（无第三方依赖）：items 逐批调度，fn 返回 Promise；
+ * 供文字区/兴趣区两段并行处理复用。
+ * @param {Array} items
+ * @param {number} limit - 同时进行数（≥1）
+ * @param {(item, index) => Promise<any>} fn
+ */
+export async function runConcurrent(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), items.length) }, async () => {
+    while (cursor < items.length) {
+      const idx = cursor;
+      cursor += 1;
+      results[idx] = await fn(items[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+/** 读取兴趣点并发度：pipeline 参数 > 环境变量 DSH_INTEREST_CONCURRENCY > 默认 2 */
+export function interestConcurrencyOf(pipelineValue) {
+  if (Number.isFinite(pipelineValue) && pipelineValue > 0) return Math.min(4, Math.floor(pipelineValue));
+  const raw = Number(process.env.DSH_INTEREST_CONCURRENCY);
+  if (Number.isFinite(raw) && raw > 0) return Math.min(4, Math.floor(raw));
+  return 2; // 默认 2：API 并发安全（官方无并发限制，但防止 429 抖动）
+}
+
+/**
  * 运行全自动智能识图编排。
  * @param {object} opts - {
  *   apiKey, baseURL, model,            // DeepSeek 视觉 API 配置
@@ -53,10 +82,13 @@ export async function runPipeline(opts) {
     apiKey, baseURL, model, buf, ext, width, height,
     question = '', rotate = 0, ocrEngine = 'auto',
     ocrOverride, maxEdge = 800, maxTokens = 8192,
-    tempDir, signal, fetchImpl, timeoutMs = 300000
+    tempDir, signal, fetchImpl, timeoutMs = 300000,
+    interestConcurrency
   } = opts;
   // OCR 函数可注入（单元测试用）；默认走本地 ocrText（paddle→rapid→windows 降级链）
   const ocrFn = typeof ocrOverride === 'function' ? ocrOverride : ocrText;
+  // 兴趣点 API 并发度（参数 > 环境 > 默认 2）；文字区并发沿用 DSH_PIPELINE_CONCURRENCY
+  const interestLimit = interestConcurrencyOf(interestConcurrency);
 
   const stages = [];
   // 原图媒体类型（官方视觉 API 支持 PNG/JPEG/WebP/GIF，按扩展名推断）
@@ -106,20 +138,6 @@ export async function runPipeline(opts) {
     const concurrency = Number.isFinite(concurrencyRaw) && concurrencyRaw > 0
       ? Math.min(6, Math.floor(concurrencyRaw))
       : 3;
-    // 简易并发限流器（无第三方依赖）：items 逐批调度，fn 返回 Promise
-    const runConcurrent = async (items, limit, fn) => {
-      const results = new Array(items.length);
-      let cursor = 0;
-      const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-        while (cursor < items.length) {
-          const idx = cursor;
-          cursor += 1;
-          results[idx] = await fn(items[idx], idx);
-        }
-      });
-      await Promise.all(workers);
-      return results;
-    };
     const jobs = await runConcurrent(textRegions, concurrency, async (region, i) => {
       // 1:1 裁剪（maxEdge=0 不缩放），保证 OCR 面对原始像素
       const cropped = await cropRegion(buf, ext, {
@@ -158,6 +176,34 @@ export async function runPipeline(opts) {
           ocrResult = { engine: 'unavailable', text: '', lines: [], degraded: true, reason: `${error.message}；${fallbackError.message}` };
         }
       }
+      // —— 置信度自适应升级：OCR 平均置信度偏低（<0.85）且视觉 API 可用 →
+      //    该文字区自动升级为视觉 API 转录（rapid 快但偶有错字；高价值区保精度）——
+      if (!ocrResult.degraded && Array.isArray(ocrResult.lines) && ocrResult.lines.length > 0 && apiKey) {
+        const scores = ocrResult.lines.map((l) => Number(l.score)).filter((s) => Number.isFinite(s));
+        const avgScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 1;
+        if (avgScore < 0.85) {
+          try {
+            const up = await recognizeRegion({
+              apiKey, baseURL, model,
+              buffer: cropped.buffer,
+              mediaType: cropped.mediaType,
+              label: `文字区域 ${i}`,
+              question: '该区域内容为文字：请完整、准确地转录全部文字内容。',
+              maxTokens,
+              signal, fetchImpl, timeoutMs
+            });
+            ocrResult = {
+              engine: 'auto-upgrade', // 标注：低置信度自动升级为视觉转录
+              text: up.description,
+              lines: [],
+              degraded: true,
+              reason: `OCR 平均置信度 ${avgScore.toFixed(2)} < 0.85，自动升级视觉转录`
+            };
+          } catch (upgradeErr) {
+            ocrResult.note = `升级失败（保留 OCR 结果）：${String(upgradeErr.message || upgradeErr).slice(0, 120)}`;
+          }
+        }
+      }
       // 简化像素网格（版式辅助）
       let grid = null;
       if (typeof buildPixelGrid === 'function') {
@@ -194,37 +240,41 @@ ${j.ocrResult.text || '（未检出文字）'}`);
     stages.push({ kind: 'ocr-skipped', reason: hasText ? '无文字区域' : '判断为无文字，跳过 OCR' });
   }
 
-  /* ── 3. 兴趣点区域：按比例裁剪（最长边 800）→ 视觉 API 识别 ── */
+  /* ── 3. 兴趣点区域：按比例裁剪（最长边 800）→ 视觉 API 识别（并行，限 interestLimit）── */
   const regionDetails = [];
-  for (let i = 0; i < interestRegions.length; i += 1) {
-    const region = interestRegions[i];
-    const cropped = await cropRegion(buf, ext, {
-      rect: [region.x0, region.y0, region.x1, region.y1],
-      maxEdge,
-      rotate
-    });
-    const regionPath = join(outputDir, `interest-${i}-${region.label?.replace(/[^\w\u4e00-\u9fa5]/g, '_') || 'region'}-${region.x0}_${region.y0}.png`);
-    await writeFile(regionPath, cropped.buffer);
-    stages.push({ kind: 'interest-crop', index: i, path: regionPath, outSize: `${cropped.width}x${cropped.height}` });
-    const res = await recognizeRegion({
-      apiKey, baseURL, model,
-      buffer: cropped.buffer,
-      mediaType: cropped.mediaType,
-      label: region.label,
-      question: question ? `${question}；${REGION_QUESTION}` : REGION_QUESTION,
-      maxTokens,
-      signal, fetchImpl, timeoutMs
-    });
+  const interestJobs = interestRegions.length > 0
+    ? await runConcurrent(interestRegions, interestLimit, async (region, i) => {
+      const cropped = await cropRegion(buf, ext, {
+        rect: [region.x0, region.y0, region.x1, region.y1],
+        maxEdge,
+        rotate
+      });
+      const regionPath = join(outputDir, `interest-${i}-${region.label?.replace(/[^\w\u4e00-\u9fa5]/g, '_') || 'region'}-${region.x0}_${region.y0}.png`);
+      await writeFile(regionPath, cropped.buffer);
+      stages.push({ kind: 'interest-crop', index: i, path: regionPath, outSize: `${cropped.width}x${cropped.height}` });
+      const res = await recognizeRegion({
+        apiKey, baseURL, model,
+        buffer: cropped.buffer,
+        mediaType: cropped.mediaType,
+        label: region.label,
+        question: question ? `${question}；${REGION_QUESTION}` : REGION_QUESTION,
+        maxTokens,
+        signal, fetchImpl, timeoutMs
+      });
+      return { region, i, regionPath, cropped, res };
+    })
+    : [];
+  for (const j of interestJobs) {
     regionDetails.push({
-      index: i,
-      label: region.label,
-      coordinates: { x0: region.x0, y0: region.y0, x1: region.x1, y1: region.y1 },
-      relative: region.relative,
-      outSize: `${cropped.width}x${cropped.height}`,
-      description: res.description,
-      path: regionPath
+      index: j.i,
+      label: j.region.label,
+      coordinates: { x0: j.region.x0, y0: j.region.y0, x1: j.region.x1, y1: j.region.y1 },
+      relative: j.region.relative,
+      outSize: `${j.cropped.width}x${j.cropped.height}`,
+      description: j.res.description,
+      path: j.regionPath
     });
-    stages.push({ kind: 'interest-done', index: i });
+    stages.push({ kind: 'interest-done', index: j.i });
   }
   if (interestRegions.length === 0) {
     stages.push({ kind: 'interest-none', note: '预检未识别出明确兴趣点区域' });

@@ -1,11 +1,14 @@
 写在前面：这个插件是我用Deepseek Harness写的，我本人没有写代码有关的知识，这个插件只是提供一个思路外加自用。Deepseek-v4-flash-vision-exp发布后由于其会把大图压缩到800*800的特性，为了不丢失图片细节就让Deepseek写了这个插件，各位随意取用，有问题的话可以提交issue（如果能自己改的话就更好了，你提交了issue我也只能给Deepseek看然后让他自己改，我本人尝试过多次均为学会任何写代码的能力，也是乘上ai的东风了让我有了开发插件的能力）
 
-> **本次更新（v0.1.3）完全由 DeepSeek Harness 自主完成**，内容：
-> ① 本地 OCR **常驻进程池**（多核并发、模型仅加载一次）——本地识别吞吐 **≈8× 提速**（20 张批量 ~66s → ~8s；单张 3.3s → 0.18s）；
-> ② 默认引擎快速化（rapid 优先；`DSH_OCR_ENGINE=paddle` 可切回高精度）；
-> ③ pipeline 多区域并发识别（`DSH_PIPELINE_CONCURRENCY` 可调）；
-> ④ **免配置形态**：发布提供**两个包**——`vision-exp-tile-v0.1.3.zip`（完整版：可选装 paddle/rapid venv 增强本地识别）与 `vision-exp-tile-v0.1.3-nopython.zip`（**无 Python 零配置版**：无需任何 venv，本地识别自动使用系统自带 Windows OCR 常驻池，开箱即用）；
-> ⑤ 回滚/调参：`DSH_OCR_POOL=0` 一键回退旧行为。
+> **本次更新（v0.1.4）完全由 DeepSeek Harness 自主完成**，内容：
+> ① **本地 OCR 检索缓存**：同图重复识别命中秒出（默认 48h；`DSH_OCR_CACHE=0` 关闭）——省钱又省时（本地缓存命中≈0 API）；
+> ② **重点区域并行识别**（默认 2 路，`DSH_INTEREST_CONCURRENCY` 或工具参数 `interest_concurrency` 可调 1-4）——整卷大图等待时间再减一半；
+> ③ **置信度自适应升级**：OCR 平均置信度 < 0.85 的区域自动切换视觉 API 转录（更快与更准自动取舍）；
+> ④ **429/5xx 指数退避重试** + **损坏图/HEIC 友好提示** + **跨块表格/长句行对齐增强** + Windows OCR 中文引擎缺失指引；
+> ⑤ 暴露高级参数：`ocr_engine` / `interest_concurrency`（向后兼容，缺省行为不变）；
+> ⑥ **双形态发布（同 v0.1.3 体例）**：`vision-exp-tile-v0.1.4.zip`（完整版：可选 paddle/rapid venv）与 `vision-exp-tile-v0.1.4-nopython.zip`（**无 Python 零配置版**：本地识别 = 系统自带 Windows OCR 常驻池）。
+> 回滚/调参：`DSH_OCR_POOL=0`（回退旧本地识别）、`DSH_OCR_CACHE=0`（关缓存）等详见各小节。
+> **中文 OCR 语言包指引（nopython 版）**：Windows 设置 → 语言与区域 → 添加「中文(简体)」语言包（含 OCR 可选功能，或 `dism /online /add-capability /capabilityname:Language.OCR~~~zh-CN~0.0.1.0`）；未安装时 Windows OCR 只识别英文/乱码，本插件会自动降级为视觉 API 转录（不报错）。
 
 # vision-exp-tile ◆ 为 deepseek-v4-flash-vision-exp 定制的大图智能识图插件
 

@@ -1,7 +1,7 @@
 {
   "name": "vision-exp-tile",
-  "version": "0.1.3",
-  "description": "为 deepseek-v4-flash-vision-exp 量身定制的大图智能识图插件：整图预检 → 本地 OCR+像素网格（文字）+ 兴趣点按比例切块（最长边 800）→ 汇总；保留全图 800x800 网格切块模式。不统计 token、不计算费用。v0.1.3：本地 OCR 常驻进程池（8×提速）+ Windows OCR 无 Python 形态。",
+  "version": "0.1.4",
+  "description": "为 deepseek-v4-flash-vision-exp 量身定制的大图智能识图插件：整图预检 → 本地 OCR+像素网格（文字）+ 兴趣点按比例切块（最长边 800）→ 汇总；保留全图 800x800 网格切块模式。不统计 token、不计算费用。v0.1.4：OCR 缓存+并行+置信度升级+双形态。",
   "type": "module",
   "main": "src/index.js",
   "exports": {
@@ -17,7 +17,7 @@
     "cordis.patch.yml"
   ],
   "scripts": {
-    "test": "node --test tests/client.test.js tests/engine.test.js tests/grid.test.js tests/ocr-pool.test.js tests/prompts.test.js tests/region.test.js tests/smart.test.js",
+    "test": "node --test tests/client.test.js tests/engine.test.js tests/grid.test.js tests/ocr-pool.test.js tests/prompts.test.js tests/region.test.js tests/smart.test.js tests/v014.test.js",
     "release-pack": "powershell -ExecutionPolicy Bypass -File scripts/release-pack.ps1"
   },
   "keywords": [

@@ -15,8 +15,8 @@
  */
 
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { writeFile, rm } from 'node:fs/promises';
+import { randomBytes, createHash } from 'node:crypto';
+import { writeFile, rm, readFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
@@ -25,6 +25,68 @@ import { getOcrPool } from './ocr-pool.js';
 
 /** 插件 src 目录（用于定位 worker 脚本） */
 const __dirnameLocal = dirname(fileURLToPath(import.meta.url));
+
+/* ------------------------------------------------------------------ */
+/* 本地 OCR 结果缓存（内容哈希；同图重复识别直接命中，免重复计算/加载）   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 缓存目录：$HOME/.vision-exp-tile-ocr-cache（env DSH_OCR_CACHE_DIR 覆盖）。
+ * 开关：DSH_OCR_CACHE=0 禁用（默认启用）；TTL：DSH_OCR_CACHE_TTL_HOURS（默认 48 小时）。
+ */
+function ocrCacheDir() {
+  return process.env.DSH_OCR_CACHE_DIR ?? join(homedir(), '.vision-exp-tile-ocr-cache');
+}
+
+/** 缓存是否启用（DSH_OCR_CACHE=0 → 禁用） */
+export function ocrCacheEnabled() {
+  return String(process.env.DSH_OCR_CACHE ?? '1').trim() !== '0';
+}
+
+/** 缓存 TTL（小时；任何有限数字均可——负数/0 视为立即过期，便于测试与应急） */
+function ocrCacheTtlMs() {
+  const h = Number(process.env.DSH_OCR_CACHE_TTL_HOURS ?? 48);
+  const hours = Number.isFinite(h) ? h : 48;
+  return hours * 3600 * 1000;
+}
+
+/** 内容哈希键（png 字节 sha256 前 32 hex） */
+export function ocrCacheKey(pngBuffer) {
+  return createHash('sha256').update(pngBuffer).digest('hex').slice(0, 32);
+}
+
+/**
+ * 查询缓存：命中且未过期 → {engine,text,lines,cached:true}；否则 null。
+ * 损坏/过期条目自动忽略（不抛错）。
+ */
+export async function ocrCacheGet(key) {
+  if (!ocrCacheEnabled()) return null;
+  try {
+    const file = join(ocrCacheDir(), `${key}.json`);
+    if (!existsSync(file)) return null;
+    const raw = await readFile(file, 'utf8');
+    const entry = JSON.parse(raw);
+    if (!entry || !Array.isArray(entry.lines)) return null;
+    if (Date.now() - (entry.ts ?? 0) > ocrCacheTtlMs()) return null;
+    return { engine: entry.engine ?? 'rapid', text: entry.text ?? '', lines: entry.lines, cached: true };
+  } catch {
+    return null;
+  }
+}
+
+/** 写入缓存（竞态无害；失败静默） */
+export async function ocrCacheSet(key, entry) {
+  if (!ocrCacheEnabled()) return;
+  try {
+    const dir = ocrCacheDir();
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${key}.json`), JSON.stringify({
+      engine: entry.engine, text: entry.text, lines: entry.lines, ts: Date.now()
+    }), 'utf8');
+  } catch {
+    /* 缓存写失败不影响主流程 */
+  }
+}
 
 /**
  * 常驻 OCR 进程池（性能优化：消除每次 spawn + 模型加载成本）。
@@ -309,6 +371,11 @@ function runRapidOcr(pngPath, timeoutMs = 90_000) {
  * @returns {Promise<{engine:string, text:string, lines:Array}>}
  */
 export async function ocrText(pngBuffer, { engine = 'auto', timeoutMs } = {}) {
+  // —— 本地 OCR 结果缓存：同图重复识别直接命中（默认 48h；DSH_OCR_CACHE=0 禁用）——
+  const cacheKey = ocrCacheKey(pngBuffer);
+  const cached = await ocrCacheGet(cacheKey);
+  if (cached) return { ...cached, cached: true };
+
   // 默认走 resolveEngine()（rapid 优先，见 resolveEngine 注释）；显式指定则尊重
   const engineUsed = engine === 'auto' ? await resolveEngine() : engine;
   const tmpPath = join(tmpdir(), `vision-tile-ocr-${randomBytes(6).toString('hex')}.png`);
@@ -323,14 +390,18 @@ export async function ocrText(pngBuffer, { engine = 'auto', timeoutMs } = {}) {
         const lines = (resp.lines ?? []).map((l) => ({
           text: l.text, x: l.x, y: l.y, width: l.width, height: l.height, score: l.score
         }));
-        return { engine: engineUsed, text: lines.map((l) => l.text).join('\n'), lines, pooled: true };
+        const entry = { engine: engineUsed, text: lines.map((l) => l.text).join('\n'), lines, pooled: true };
+        await ocrCacheSet(cacheKey, entry);
+        return entry;
       } catch (poolErr) {
         // 池失败（worker 超时/崩溃）→ 回退旧实现（每张一进程），绝不因池而丢失识别
         if (engineUsed === 'paddle') result = await runPaddleOcr(tmpPath, timeoutMs);
         else if (engineUsed === 'rapid') result = await runRapidOcr(tmpPath, timeoutMs);
         else result = await runWindowsOcr(tmpPath, timeoutMs);
         const lines = result.lines ?? [];
-        return { engine: engineUsed, text: lines.map((l) => l.text).join('\n'), lines, pooled: false, note: String(poolErr.message || poolErr).slice(0, 200) };
+        const entry = { engine: engineUsed, text: lines.map((l) => l.text).join('\n'), lines, pooled: false, note: String(poolErr.message || poolErr).slice(0, 200) };
+        await ocrCacheSet(cacheKey, entry);
+        return entry;
       }
     }
     // —— 旧路径/Windows 引擎 ——
@@ -339,11 +410,13 @@ export async function ocrText(pngBuffer, { engine = 'auto', timeoutMs } = {}) {
     else result = await runWindowsOcr(tmpPath, timeoutMs);
     // 统一输出：[按行拼接文本 + 行像素框]
     const lines = result.lines ?? [];
-    return {
+    const entry = {
       engine: engineUsed,
       text: lines.map((l) => l.text).join('\n'),
       lines
     };
+    await ocrCacheSet(cacheKey, entry);
+    return entry;
   } catch (error) {
     // 目标引擎失败 → windows 兜底（若目标已失败且不是 windows）
     if (engineUsed !== 'windows') {
@@ -353,6 +426,10 @@ export async function ocrText(pngBuffer, { engine = 'auto', timeoutMs } = {}) {
       } catch {
         throw error;
       }
+    }
+    // Windows OCR 引擎缺失（例如系统仅安装英文 OCR 语言包）→ 给出友好指引
+    if (engineUsed === 'windows' && /no OCR engine for the requested language/i.test(String(error.message))) {
+      throw new Error('ocr-local: Windows OCR 未找到中文 OCR 引擎——请在「设置→语言→Windows 更新/可选功能→语言→OCR」安装 中文(简体) 语言包（本机已安装，重登录后生效）；或设置 DSH_OCR_ENGINE=rapid 使用 venv 引擎');
     }
     throw error;
   } finally {

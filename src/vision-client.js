@@ -84,6 +84,11 @@ function fmtErr(e) {
   }
 }
 
+/** 简易等待（退避重试用） */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * 单次调用 DeepSeek chat/completions（非流式，简单可靠）。
  * 健壮性处理：当模型只输出 reasoning（思考）而未输出正文（content 为空，
@@ -97,13 +102,16 @@ export async function callChat(opts) {
   const {
     apiKey, baseURL = 'https://api.deepseek.com', model,
     system = '', userText = '', images = [], maxTokens = 8192,
-    detail = 'original', thinking, signal, fetchImpl = fetch, timeoutMs = 300000
+    detail = 'original', thinking, signal, fetchImpl = fetch, timeoutMs = 300000,
+    retryDelays = [1000, 3000, 9000] // 429/5xx 退避节奏（测试可注入更短值）
   } = opts;
   if (!apiKey) throw new Error('vision-client: missing DeepSeek API key (set env var DEEPSEEK_API_KEY or configure apiKeyEnv)');
   const url = `${baseURL.replace(/\/+$/, '')}/chat/completions`;
 
   // 单次请求执行：返回 {payload, content}；网络/HTTP 错误原样抛出
-  const fetchOnce = async (maxT) => {
+  // —— 性能/健壮性优化：429/5xx/瞬时网络错误 → 指数退避重试（最多 3 次，1s/3s/9s）——
+  const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+  const fetchOnce = async (maxT, attempt = 0) => {
     const body = buildRequestBody({ model, system, userText, images, maxTokens: maxT, detail, thinking });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
@@ -119,11 +127,15 @@ export async function callChat(opts) {
     } catch (error) {
       clearTimeout(timer);
       if (signal?.aborted || controller.signal.aborted) {
-        // 展示真实取消原因（signal.reason），不再输出 [object Object]
         const reason = signal?.reason ?? controller.signal.reason;
         throw new Error(
           `vision-client: request aborted (reason=${reason ? fmtErr(reason) : 'unset'}; err=${fmtErr(error)})`
         );
+      }
+      // 瞬时网络错误：退避重试一次（防 VPN/代理抖动）
+      if (attempt < 1) {
+        await sleep(1500 * (attempt + 1));
+        return fetchOnce(maxT, attempt + 1);
       }
       throw new Error(`vision-client: network error: ${fmtErr(error)}`);
     }
@@ -137,6 +149,13 @@ export async function callChat(opts) {
     }
     if (!response.ok) {
       const apiMsg = payload?.error?.message ?? payload?.message ?? JSON.stringify(payload).slice(0, 300);
+      if (RETRYABLE.has(response.status) && attempt < 3) {
+        // 尊重服务端 Retry-After（秒），否则按退避节奏（默认 1s/3s/9s）
+        const ra = Number(payload?.error?.retry_after ?? 0);
+        const delay = ra > 0 ? ra * 1000 : retryDelays[attempt] ?? 9000;
+        await sleep(delay);
+        return fetchOnce(maxT, attempt + 1);
+      }
       throw new Error(`vision-client: API error HTTP ${response.status} (${payload?.error?.code ?? 'unknown'}): ${apiMsg}`);
     }
     const content = payload?.choices?.[0]?.message?.content ?? '';

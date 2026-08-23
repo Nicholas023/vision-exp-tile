@@ -271,14 +271,24 @@ async function loadImageAndSplit(ctx, exec, args, cfg, tool) {
 
   // 4. 读切分参数并执行切图。
   const params = readSplitParams(args, cfg, tool);
-  const r = await splitImage(Buffer.from(bytes), ext, {
-    blockSize: params.blockSize,
-    overlap: params.overlap,
-    threshold: params.cutThreshold,
-    format: params.format,
-    quality: params.quality,
-    rotate: params.rotate
-  });
+  let r;
+  try {
+    r = await splitImage(Buffer.from(bytes), ext, {
+      blockSize: params.blockSize,
+      overlap: params.overlap,
+      threshold: params.cutThreshold,
+      format: params.format,
+      quality: params.quality,
+      rotate: params.rotate
+    });
+  } catch (err) {
+    const msg = String(err?.message ?? err);
+    // —— 损坏图/不支持的格式（如 HEIC/AVIF/CMYK 异常）友好提示（不裸抛栈）——
+    if (/unsupported|not supported|unknown format|decode|libheif|heif|avif/i.test(msg) || /\.(heic|heif|avif)$/i.test(ext)) {
+      throw new Error(`${tool}: 图片格式 ${ext || '未知'} 可能不受支持或文件损坏（常见：HEIC/AVIF 需先转 PNG/JPEG；CMYK 或损坏文件需先转图）。原始错误：${msg.slice(0, 140)}`);
+    }
+    throw err;
+  }
 
   // 5. 宿主可用绝对路径（用于定位输出目录）与原图文件名（不含扩展名）。
   const hostPath = ctx.fs.processPath(target);
@@ -455,7 +465,7 @@ export function createRecognizeTool(ctx, cfg) {
       '智能识图（deepseek-v4-flash-vision-exp）：先整图预检 → 按需本地 OCR + 重点区域按比例切块识别 → 汇总。',
       '参数：file_path（必填）；strategy（enum[smart/pipeline/full]，默认 smart）：smart=模型编排（预检后由模型决定后续，可先问用户）；pipeline=插件全自动（预检→本地OCR→兴趣点识别→汇总一次完成，无交互）；full=原全图网格切块识别（先 overview 缩略图再切块，用于整页材料逐块转录）。',
       '通用参数：question（string，默认“完整识别大图内容”；可描述重点区域让模型优先）；rotate（0/90/180/270，默认 0，图片横倒/倒置时使用）；max_tokens（默认 8192）；json（仅 full 模式有效）。',
-      'pipeline 模式追加：ocr_engine（auto/paddle/rapid/windows，默认 auto=优先 paddle 自动降级）；block_size/cut_threshold/overlap/group_size/format/quality/out_dir/with_overview 仅 full 模式有效。',
+      'pipeline 模式追加：ocr_engine（auto/paddle/rapid/windows，默认 auto=优先 rapid 自动降级）；interest_concurrency（兴趣点 API 并行数 1..4，默认 2）；block_size/cut_threshold/overlap/group_size/format/quality/out_dir/with_overview 仅 full 模式有效。',
       'smart 模式流程（请模型按此执行）：1) 本工具先返回预检结果（有无文字、文字区域、兴趣点区域、整图概要）；2) 若重点内容不明确，先向用户提问；3) 文字区域→vision_region_crop(recognize=true) 视觉直读转录（本插件自带能力，跨环境可用）；4) 兴趣点→vision_region_crop(recognize=true) 逐点识别；5) 汇总成完整答案。',
       '读取 API key：从环境变量（默认 DEEPSEEK_API_KEY）读取；未配置会给出明确提示。',
       '返回：预检清单/整体答案 + 统计（模式、区域数、请求数）。不统计 token、不计算费用。'
@@ -468,7 +478,8 @@ export function createRecognizeTool(ctx, cfg) {
         strategy: { type: 'string', enum: ['smart', 'pipeline', 'full'], description: 'smart=模型编排（默认）；pipeline=插件全自动；full=原全图网格切块。' },
         question: { type: 'string', description: '描述你想从图中知道的；空=完整识别大图内容。也可指明重点位置（如"左上角表格"）。' },
         rotate: { type: 'integer', enum: [0, 90, 180, 270], description: '识别前顺时针旋转角度（0/90/180/270）。图片横倒/倒置时使用，默认 0。' },
-        ocr_engine: { type: 'string', enum: ['auto', 'paddle', 'rapid', 'windows'], description: 'pipeline 模式本地 OCR 引擎；auto=优先 paddle 自动降级。默认 auto。' },
+        ocr_engine: { type: 'string', enum: ['auto', 'paddle', 'rapid', 'windows'], description: 'pipeline 模式本地 OCR 引擎；auto=优先 rapid 自动降级。默认 auto。' },
+        interest_concurrency: { type: 'integer', description: 'pipeline 模式兴趣点视觉识别并行数（1..4，默认 2；并发可提速但过大易触发 429）。' },
         mode: { type: 'string', enum: ['auto', 'single', 'layered'], description: '仅 strategy=full 有效：块数≤60单请求，否则分层聚合。默认 auto。' },
         group_size: { type: 'integer', description: '仅 full：分层聚合每组最多块数（1..240）。默认 40。' },
         json: { type: 'boolean', description: '仅 full：true=输出 JSON 对象（结构化）。默认 false。' },
@@ -625,6 +636,9 @@ export function createRecognizeTool(ctx, cfg) {
 
       // 4b. pipeline：插件全自动（预检 → 本地 OCR + 像素网格 → 兴趣点区域识别 → 本地模板汇总）。
       if (strategyRaw === 'pipeline') {
+        const interestConcurrency = args.interest_concurrency === undefined
+          ? undefined
+          : readInt(args.interest_concurrency, 2, 1, 4, 'interest_concurrency', tool);
         const p = await runPipeline({
           apiKey,
           baseURL: cfg.baseURL,
@@ -636,6 +650,7 @@ export function createRecognizeTool(ctx, cfg) {
           question,
           rotate: img.rotate ?? 0,
           ocrEngine: ocrEngineRaw,
+          interestConcurrency,
           maxTokens,
           signal: exec.signal,
           timeoutMs: cfg.timeoutMs
