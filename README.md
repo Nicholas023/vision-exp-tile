@@ -215,3 +215,7 @@ dsh web
 ## 许可
 
 MIT © vision-exp-tile contributors
+
+---
+
+如果这个插件对你有帮助，欢迎点个 ⭐ **Star** 支持一下～（你的支持就是持续更新的动力）
