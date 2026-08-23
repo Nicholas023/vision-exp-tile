@@ -21,6 +21,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { cpus } from 'node:os';
 import { join, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -52,8 +53,13 @@ class WorkerSlot {
   }
 
   _start() {
-    // python worker 加 -u 保证 stdout 无缓冲（行协议实时性）；node fake worker 不加
-    const args = this.workerPath.endsWith('.py') ? ['-u', this.workerPath] : [this.workerPath];
+    // worker 参数模式按扩展名选择：.py → python -u；.ps1 → powershell -Command
+    // （重要实测结论：WinRT 类型在 -File 模式下无法加载，-Command 模式正常）；其他 → node
+    const low = this.workerPath.toLowerCase();
+    let args;
+    if (low.endsWith('.py')) args = ['-u', this.workerPath];
+    else if (low.endsWith('.ps1')) args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', readFileSync(this.workerPath, 'utf8')];
+    else args = [this.workerPath];
     this.proc = spawn(this.pythonCmd, args, {
       env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
       windowsHide: true,
@@ -250,18 +256,21 @@ function installExitHook() {
 
 /**
  * 获取（或惰性创建）指定解释器的 OCR 进程池。
- * @param {string} pythonCmd - venv python 路径（paddle 与 rapid 所在 venv 不同，各建一池）
+ * @param {string} pythonCmd - 解释器可执行路径（paddle_venv/rapid_venv 各一池；Windows OCR 用 'powershell.exe'）
  * @param {number} [factor] - 池大小覆盖（默认读 DSH_OCR_POOL；默认 4 = 开启，0 = 禁用）
+ * @param {string} [workerPath] - worker 脚本路径（默认 src/ocr-worker.py；Windows OCR 用 ocr-win-worker.ps1）
  * @returns {OcrPool|null} 禁用时返回 null（上游回退旧逻辑）
  */
-export function getOcrPool(pythonCmd, factor) {
+export function getOcrPool(pythonCmd, factor, workerPath) {
   const size = factor ?? poolSizeFromEnv();
   if (size <= 0) return null;
   installExitHook();
-  let pool = poolRegistry.get(pythonCmd);
+  // 缓存键：解释器 + worker 脚本（解释器相同时不同 worker 分池）
+  const key = workerPath ? `${pythonCmd}::${workerPath}` : pythonCmd;
+  let pool = poolRegistry.get(key);
   if (!pool) {
-    pool = new OcrPool({ size, pythonCmd });
-    poolRegistry.set(pythonCmd, pool);
+    pool = new OcrPool({ size, pythonCmd, workerPath });
+    poolRegistry.set(key, pool);
   }
   return pool;
 }

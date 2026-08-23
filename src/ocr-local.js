@@ -34,8 +34,13 @@ const __dirnameLocal = dirname(fileURLToPath(import.meta.url));
  * pool 为 null 时 ocrText 走原有"每张一进程"逻辑（兜底）。
  */
 function ocrPool(engineUsed) {
-  const py = engineUsed === 'paddle' ? paddlePython() : rapidPython();
   try {
+    if (engineUsed === 'windows') {
+      // Windows OCR 常驻池：powershell.exe + ocr-win-worker.ps1（免 Python 形态核心）
+      const worker = join(__dirnameLocal, 'ocr-win-worker.ps1');
+      return getOcrPool('powershell.exe', undefined, worker);
+    }
+    const py = engineUsed === 'paddle' ? paddlePython() : rapidPython();
     return getOcrPool(py);
   } catch {
     return null;
@@ -310,8 +315,8 @@ export async function ocrText(pngBuffer, { engine = 'auto', timeoutMs } = {}) {
   await writeFile(tmpPath, pngBuffer);
   try {
     let result;
-    // —— 性能优化：paddle/rapid 优先走常驻进程池（模型常驻 + 多核并行）——
-    const pool = engineUsed === 'paddle' || engineUsed === 'rapid' ? ocrPool(engineUsed) : null;
+    // —— 性能优化：paddle/rapid/windows 均优先走常驻进程池（引擎常驻；多核并行）——
+    const pool = ocrPool(engineUsed);
     if (pool) {
       try {
         const resp = await pool.execute({ engine: engineUsed, path: tmpPath });
@@ -322,7 +327,8 @@ export async function ocrText(pngBuffer, { engine = 'auto', timeoutMs } = {}) {
       } catch (poolErr) {
         // 池失败（worker 超时/崩溃）→ 回退旧实现（每张一进程），绝不因池而丢失识别
         if (engineUsed === 'paddle') result = await runPaddleOcr(tmpPath, timeoutMs);
-        else result = await runRapidOcr(tmpPath, timeoutMs);
+        else if (engineUsed === 'rapid') result = await runRapidOcr(tmpPath, timeoutMs);
+        else result = await runWindowsOcr(tmpPath, timeoutMs);
         const lines = result.lines ?? [];
         return { engine: engineUsed, text: lines.map((l) => l.text).join('\n'), lines, pooled: false, note: String(poolErr.message || poolErr).slice(0, 200) };
       }

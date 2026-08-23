@@ -72,6 +72,8 @@ while ($true) {
     } catch {
         $resp = [PSCustomObject]@{ id = -1; ok = $false; error = $_.Exception.Message }
     }
-    $resp | ConvertTo-Json -Depth 4 -Compress | [Console]::Out.WriteLine()
+    # PS5.1 兼容：方法调用不能作管道下游——先转字符串再输出
+    $out = $resp | ConvertTo-Json -Depth 4 -Compress
+    [Console]::Out.WriteLine($out)
     [Console]::Out.Flush()
 }
