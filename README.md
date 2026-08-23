@@ -23,6 +23,11 @@
 
 > 独立 DSH 插件：**零依赖任何第三方 DSH 插件**（picturereader 等均未使用，仅用纯官方 DSH 服务 + 可选开源 OCR 环境）。把大图切成 **800×800 无损小块**（官方缩放规则的"甜蜜点"：块在模型侧**不被降采样**、每块**≤384 token**），携带**坐标标注 + 分块聚合逻辑**直接调用 DeepSeek 视觉 API 完成识别与聚合，返回结构化答案（**不统计 token、不计算费用**）。
 
+## 🎬 宣传片（v0.4.0）
+
+> [▶️ 观看宣传片（128 秒 · 带 BGM · 含致谢页）](https://github.com/Nicholas023/vision-exp-tile/releases/download/v0.4.0/vision-exp-tile-v0.4.0-promo-bgm.mp4)
+> 视频背景音乐：《春景故人来》—— 铁痕电台-MSR × Kirara Magic；DeepSeek 官方鲸鱼形象（deepseek.com）。
+
 ## 一、为什么要 800×800
 
 官方文档（api-docs.deepseek.com/guides/vision）规定：每张图进模型前自动缩放——总像素 < ~384×384 放大，更大的图按长宽比缩小到 **≈800×800 总像素**，**每张图 token 封顶 384**。
