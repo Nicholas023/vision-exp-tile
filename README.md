@@ -202,10 +202,6 @@ dsh web
 - "完美识别"是质量目标：块数越多难度越高，分层聚合显著缓解；跨块被切断的细线级元素仍可能合并出错（建议 `overlap=64`）；
 - 全自动 pipeline 无交互通道：预检"重点不明确"时会在结果中说明，可改用 smart（模型先问你）或 `vision_region_crop` 指定坐标。
 
-### 用户如何安装发布版
-
-下载 Release 里的 `vision-exp-tile-vX.Y.Z.zip`，解压后按前面"二、安装与挂载"步骤操作（放到 `~/.dsh/plugins/vision-exp-tile` + profile 挂 `link:` 依赖），或直接从源码仓库 `git clone` 后同样挂载。
-
 ## 许可
 
 MIT © vision-exp-tile contributors
