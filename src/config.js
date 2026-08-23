@@ -39,7 +39,7 @@ export const NS = 'vision-exp-tile';
  * - rotate      识别前顺时针旋转角度（0/90/180/270）；默认 0。
  * - ocrPoolTimeoutMs OCR 池单请求超时（毫秒，20000..1200000）；默认 120s。
  * - performanceTier 性能档位（auto/fast/normal/slow）；默认 auto=自动探测。
- * - testTimeoutFactor 测试超时判定倍率（1..4）；默认 1。
+ * - testTimeoutFactor 测试超时判定倍率（1..8，推荐 4=slow 档默认，手动最保守 8）；默认 1。
  * - testSkipTiming 是否跳过时序敏感断言（默认 false）。
  */
 export const DEFAULT_CONFIG = Object.freeze({
@@ -203,7 +203,7 @@ export function normalizeConfig(raw) {
   // 8. v0.4.1：慢机测试自适应字段（OCR 池超时/性能档位/测试倍率/跳过声明）。
   const ocrPoolTimeoutMs = readInt(src.ocrPoolTimeoutMs, DEFAULT_CONFIG.ocrPoolTimeoutMs, 20000, 1200000, 'ocrPoolTimeoutMs');
   const performanceTier = readEnum(src.performanceTier, DEFAULT_CONFIG.performanceTier, ['auto', 'fast', 'normal', 'slow'], 'performanceTier');
-  const testTimeoutFactor = readInt(src.testTimeoutFactor, DEFAULT_CONFIG.testTimeoutFactor, 1, 4, 'testTimeoutFactor');
+  const testTimeoutFactor = readInt(src.testTimeoutFactor, DEFAULT_CONFIG.testTimeoutFactor, 1, 8, 'testTimeoutFactor');
   const testSkipTiming = boolVal(src.testSkipTiming, DEFAULT_CONFIG.testSkipTiming);
 
   return {

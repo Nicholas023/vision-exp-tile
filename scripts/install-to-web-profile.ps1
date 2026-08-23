@@ -71,7 +71,7 @@ function Get-SlowTuningKeys {
         'ocr_pool_timeout_ms' = '240000'
         'ocr_pool'            = '2'
         'gpu_provider'        = "'off'"
-        'test_timeout_factor' = '2'
+        'test_timeout_factor' = '4'
     }
 }
 

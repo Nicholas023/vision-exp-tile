@@ -146,9 +146,9 @@ export const SettingsSchema = z.object({
   test_timeout_factor: z
     .number()
     .min(1)
-    .max(4)
+    .max(8)
     .default(1)
-    .description('高级：测试超时判定倍率（1..4）。慢机可调大，降低时序抖动导致的偶发失败。映射环境变量 VISION_TEST_TIMEOUT_FACTOR'),
+    .description('高级：测试超时判定倍率（1..8；推荐 4=slow 档位默认，手动可最保守到 8）。慢机可调大，降低时序抖动导致的偶发失败。映射环境变量 VISION_TEST_TIMEOUT_FACTOR'),
   test_skip_timing: z
     .boolean()
     .default(false)

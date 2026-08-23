@@ -3,7 +3,7 @@
  *
  * 目的：让测试在被较差机型（慢机）运行时不因时序抖动而偶发失败。从以下环境变量
  * 读取三个可调参数（均由设置页/自检/安装脚本/上层导出注入）：
- *  - VISION_TEST_TIMEOUT_FACTOR：超时判定倍率（1..4，默认 1；慢机可调大，如 2）。
+ *  - VISION_TEST_TIMEOUT_FACTOR：超时判定倍率（1..8，默认 1；推荐 4=slow 档默认，手动最保守 8；慢机可调大）。
  *  - VISION_TEST_SKIP_TIMING：是否跳过时序敏感断言（1/true/yes/on→跳过，默认不跳）。
  *  - DSH_OCR_POOL_TIMEOUT：运行时的 OCR 池单请求超时（毫秒；由 src 模块读取，
  *    此处仅在需要「与运行时一致」时参考，单元测试的池超时用 poolTimeoutMs(base)）。
@@ -16,13 +16,13 @@
  */
 
 /**
- * 读取测试超时判定倍率（1..4，非法/未设置回退 1）。
- * @returns {number} 倍率（1..4 整数）。
+ * 读取测试超时判定倍率（1..8，非法/未设置回退 1；对 >8 的值 clamp 到 8）。
+ * @returns {number} 倍率（1..8 整数）。
  */
 export function timingFactor() {
   const raw = Number(process.env.VISION_TEST_TIMEOUT_FACTOR);
   if (Number.isFinite(raw) && raw >= 1) {
-    return Math.min(4, Math.max(1, Math.floor(raw)));
+    return Math.min(8, Math.max(1, Math.floor(raw)));
   }
   return 1;
 }

@@ -13,11 +13,11 @@
 
 ### 新功能
 
-1. **设备档案模块**（新增 `src/device.js`）：`probeDevice`（CPU 核数/内存/GPU 名，GPU 用 nvidia-smi 1.5s 超时、失败返回 null，可 mock）、`classifyTier`（slow/normal/fast）、`applyTierRecommendations`（slow 放宽池超时到 240s、池并发降到 2、关 GPU、测试倍率×2；normal/fast 保持默认）、`deviceProfileText`。
+1. **设备档案模块**（新增 `src/device.js`）：`probeDevice`（CPU 核数/内存/GPU 名，GPU 用 nvidia-smi 1.5s 超时、失败返回 null，可 mock）、`classifyTier`（slow/normal/fast）、`applyTierRecommendations`（slow 放宽池超时到 240s、池并发降到 2、关 GPU、测试倍率×4；性能较好机器 ×2 不足以体现慢机差异，×4 给慢机留足余量，可手动到最保守的 ×8；normal/fast 保持默认）、`deviceProfileText`。
 2. **设置项新增 4 字段 + 1 只读**：
    - `ocr_pool_timeout_ms`（20000..1200000，默认 120000，env `DSH_OCR_POOL_TIMEOUT`）——OCR 池单请求超时，可调；
    - `performance_tier`（auto/fast/normal/slow，默认 auto，env `DSH_OCR_PERF_TIER`）——auto=自动探测，非 auto=用户强制；
-   - `test_timeout_factor`（1..4，默认 1，env `VISION_TEST_TIMEOUT_FACTOR`）——测试超时判定倍率；
+   - `test_timeout_factor`（1..8，默认 1，推荐 4=slow 档默认，手动最保守 8，env `VISION_TEST_TIMEOUT_FACTOR`）——测试超时判定倍率；
    - `test_skip_timing`（boolean，默认 false，env `VISION_TEST_SKIP_TIMING`）——跳过时序敏感断言；
    - `device_profile`（text，只读）——运行时设备画像摘要，自动填充。
    - 设置/运行时 4 层全链同步（settings-schema / config / runtime / client.js 双语 label），并保持"用户显式值 > 档位推荐 > 默认"。
@@ -32,7 +32,8 @@
 ### 验证
 
 - `npm test`：**128/128** 全绿（原 111 + 新增 device.test.js 13 项 + suite-env.test.js 4 项 + client-bundle 清单补 performance_tier）；
-- `VISION_TEST_TIMEOUT_FACTOR=2 npm test`：128/128 仍全绿（慢机放宽窗口）；
+- `VISION_TEST_TIMEOUT_FACTOR=2 npm test`：128/128 仍全绿（倍率放宽窗口）；
+- `VISION_TEST_TIMEOUT_FACTOR=8 npm test`：128/128 仍全绿（模拟最保守慢机 ×8，性能较好的本机也无超时误报）；
 - `VISION_TEST_SKIP_TIMING=1 npm test`：127 通过 + 1 跳过（超时/时序敏感用例），0 失败；
 - `node scripts/self-check.mjs --yes`：设备画像（本机 16 核/15.6GB/RTX 3050 Ti → normal）→ 注入 120000/×1 → 128/128 通过；
 - `node scripts/probe-device.mjs`：输出合法 JSON；

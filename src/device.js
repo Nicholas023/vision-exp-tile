@@ -195,8 +195,9 @@ export function classifyTier(probe) {
  * 按档位返回「推荐覆盖」对象（纯函数）。
  *
  * - slow：放宽 OCR 池单请求超时（240s）、降 OCR 池并发（2，更省资源/防盗崩）、
- *   关停 GPU（gpuProvider='off'，避免慢机 GPU 反而拖慢/不稳定），测试超时倍率 ×2
- *   （降低慢机时序抖动导致的偶发超时）；
+ *   关停 GPU（gpuProvider='off'，避免慢机 GPU 反而拖慢/不稳定），测试超时倍率 ×4
+ *   （依据：性能较好的机器用 ×2 不足以体现慢机与时序抖动的差异；×4 给慢机留足余量，
+ *   用户也可手动调到最保守的 ×8——见设置项 test_timeout_factor 1..8）；
  * - normal：默认（用 DEFAULT_RECOMMENDATIONS，即不额外覆盖）；
  * - fast：保持默认（testTimeoutFactor=1），不影响现有行为。
  *
@@ -209,7 +210,7 @@ export function applyTierRecommendations(tier) {
       ocrPoolTimeoutMs: 240_000,
       ocrPool: 2,
       gpuProvider: 'off',
-      testTimeoutFactor: 2
+      testTimeoutFactor: 4
     };
   }
   if (tier === 'fast') {

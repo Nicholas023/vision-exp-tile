@@ -7,8 +7,8 @@
 各位随意取用：有问题可以提交 **Issue**（如果能自己改的话就更好了——你提交了 Issue，我也只能给 DeepSeek 看然后让他自己改；我本人尝试过多次，均未学会任何写代码的能力，也是乘上 **AI** 的东风，让我有了开发插件的能力）。
 
 > **本次更新（v0.4.1）完全由 DeepSeek Harness 自主完成**，内容：
-> ① **慢机测试自适应（解决"较差机型全量测试时 OCR 池超时导致测试不通过"）**：新增设备档位自动识别（CPU 核数/内存/GPU）与「测试前确认 + 慢机放宽超时」机制——较差机型（slow 档）自动放宽 OCR 池单请求超时（120s→240s）、降低池并发（4→2）、关停 GPU，并把测试超时判定倍率 ×2，消除慢机因时序抖动导致的偶发失败；
-> ② **设置项增强**：新增 `ocr_pool_timeout_ms`（OCR 池单请求超时，可调）、`performance_tier`（auto/fast/normal/slow，auto=自动探测）、`test_timeout_factor`（测试超时倍率 1..4）、`test_skip_timing`（跳过时序敏感断言）+ 只读设备画像 `device_profile`；用户显式值 > 档位推荐 > 默认；
+> ① **慢机测试自适应（解决"较差机型全量测试时 OCR 池超时导致测试不通过"）**：新增设备档位自动识别（CPU 核数/内存/GPU）与「测试前确认 + 慢机放宽超时」机制——较差机型（slow 档）自动放宽 OCR 池单请求超时（120s→240s）、降低池并发（4→2）、关停 GPU，并把测试超时判定倍率 ×4（性能较好机器用 ×2 不足以体现慢机差异；×4 给慢机留足余量，可手动到最保守的 ×8），消除慢机因时序抖动导致的偶发失败；
+> ② **设置项增强**：新增 `ocr_pool_timeout_ms`（OCR 池单请求超时，可调）、`performance_tier`（auto/fast/normal/slow，auto=自动探测）、`test_timeout_factor`（测试超时倍率 1..8，推荐 4=slow 档默认，手动最保守 8）、`test_skip_timing`（跳过时序敏感断言）+ 只读设备画像 `device_profile`；用户显式值 > 档位推荐 > 默认；
 > ③ **安装即优化 + 自检入口**：安装脚本 `install-to-web-profile.ps1` 自动识别设备，slow 档自动把调优键写入 settings.yaml 的 `vision-exp-tile` 分区（仅未显式设置的键，幂等 + 备份 + 可 `-NoDeviceTune` 跳过）；新增 `npm run selfcheck`（`node scripts/self-check.mjs`）——测试前先问是否运行（一般推荐运行），按设备档位注入超时/倍率，慢机仍超时可设置页调高 `ocr_pool_timeout_ms` 或开启 `test_skip_timing` 声明跳过时序断言；
 > ④ **其余**：`client.js`/设置页同步 4 新字段 + 只读画像；OCR 池超时统一由 `DSH_OCR_POOL_TIMEOUT` 控制（`gpuPoolTimeoutMs` 与 pipeline 的写死 120s 一并收敛）；新增 `device.test.js`/`suite-env.test.js`（含慢机注入验证）。
 
@@ -138,7 +138,7 @@ dsh web
 | `format` / `quality` | png / 90 | 块编码 |
 | `ocrPoolTimeoutMs` | `120000` | OCR 池单请求超时（ms，20000..1200000；慢机可调大） |
 | `performanceTier` | `auto` | 性能档位：auto=自动探测（默认）/fast/normal/slow（非 auto=用户强制，不应用自动推荐） |
-| `testTimeoutFactor` | `1` | 测试超时判定倍率（1..4；慢机可调大，降低时序抖动失败） |
+| `testTimeoutFactor` | `1` | 测试超时判定倍率（1..8；推荐 4=slow 档默认，手动最保守 8；慢机可调大，降低时序抖动失败） |
 | `testSkipTiming` | `false` | 是否跳过时序敏感断言（用户声明跳过测试） |
 
 ## 四、成本参考（仅供了解，插件本身不计算）

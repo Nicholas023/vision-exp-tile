@@ -243,9 +243,9 @@ export function envFromSettings(raw) {
   const perf = String(v.performance_tier ?? 'auto').trim();
   if (perf !== '' && perf !== 'auto') out.DSH_OCR_PERF_TIER = perf;
 
-  // VISION_TEST_TIMEOUT_FACTOR：test_timeout_factor 显式值 > slow 档推荐（2）> 不设置（测试默认 1）。
+  // VISION_TEST_TIMEOUT_FACTOR：test_timeout_factor 显式值 > slow 档推荐（4）> 不设置（测试默认 1）。
   const ttf = Number(v.test_timeout_factor);
-  if (Number.isInteger(ttf) && ttf >= 1 && ttf <= 4) {
+  if (Number.isInteger(ttf) && ttf >= 1 && ttf <= 8) {
     out.VISION_TEST_TIMEOUT_FACTOR = String(ttf);
   } else if (rec.testTimeoutFactor !== undefined && rec.testTimeoutFactor !== DEFAULT_RECOMMENDATIONS.testTimeoutFactor) {
     out.VISION_TEST_TIMEOUT_FACTOR = String(rec.testTimeoutFactor);

@@ -70,7 +70,7 @@ const rec = applyTierRecommendations(tier);
 console.log('=== vision-exp-tile 自检 ===');
 console.log('设备画像：' + deviceProfileText(probe));
 console.log('性能档位：' + tier);
-console.log('将生效推荐：' + JSON.stringify(rec) + '（slow 档自动放宽 OCR 池超时/降并发/关 GPU/测试倍率×2；其余保持默认）');
+console.log('将生效推荐：' + JSON.stringify(rec) + '（slow 档自动放宽 OCR 池超时/降并发/关 GPU/测试倍率×4；其余保持默认）');
 console.log('');
 
 /* ------------------------------------------------------------------ */
@@ -119,7 +119,7 @@ if (mode === 'no') {
 //   等模块读取；单元测试的池超时则用 suite-env 的倍率放大）。
 const poolTimeout = rec.ocrPoolTimeoutMs ?? 120000;
 
-// VISION_TEST_TIMEOUT_FACTOR：测试超时判定倍率（slow=2，其余=1）。
+// VISION_TEST_TIMEOUT_FACTOR：测试超时判定倍率（slow=4，其余=1）。
 const factor = rec.testTimeoutFactor ?? 1;
 
 // VISION_TEST_SKIP_TIMING：用户声明跳过时序敏感断言时置 1。

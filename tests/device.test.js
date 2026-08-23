@@ -56,12 +56,12 @@ test('classifyTier：探测缺失/非法 → 按 normal（保守），不因数�
 /* applyTierRecommendations                                             */
 /* ------------------------------------------------------------------ */
 
-test('applyTierRecommendations：slow 放宽超时/降并发/关 GPU/测试倍率×2', () => {
+test('applyTierRecommendations：slow 放宽超时/降并发/关 GPU/测试倍率×4', () => {
   const rec = applyTierRecommendations('slow');
   assert.equal(rec.ocrPoolTimeoutMs, 240000);
   assert.equal(rec.ocrPool, 2);
   assert.equal(rec.gpuProvider, 'off');
-  assert.equal(rec.testTimeoutFactor, 2);
+  assert.equal(rec.testTimeoutFactor, 4, 'slow 推荐 ×4（性能好机器 ×2 不足以体现慢机差异）');
 });
 
 test('applyTierRecommendations：normal 用默认（不覆盖池/GPU）、fast 保持默认', () => {
@@ -121,7 +121,7 @@ test('envFromSettings：performance_tier=auto + slow 设备 → 自动应用推�
     assert.equal(env.DSH_OCR_POOL_TIMEOUT, '240000', 'slow → 放宽池超时');
     assert.equal(env.DSH_OCR_POOL, '2', 'slow → 降池并发');
     assert.equal(env.DSH_OCR_GPU_PROVIDER, 'off', 'slow → 关 GPU');
-    assert.equal(env.VISION_TEST_TIMEOUT_FACTOR, '2', 'slow → 测试倍率×2');
+    assert.equal(env.VISION_TEST_TIMEOUT_FACTOR, '4', 'slow → 测试倍率×4');
   } finally {
     _clearProbeCache();
   }

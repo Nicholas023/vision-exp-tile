@@ -37,13 +37,13 @@ test('timingFactor：默认 1；显式 2/3/4 生效', () => {
   }
 });
 
-test('timingFactor：非法值回退 1；>4 clamp 到 4；<=0 回退 1', () => {
+test('timingFactor：非法值回退 1；>8 clamp 到 8；<=0 回退 1', () => {
   const snap = snapEnv();
   try {
     process.env.VISION_TEST_TIMEOUT_FACTOR = 'abc';
     assert.equal(timingFactor(), 1);
     process.env.VISION_TEST_TIMEOUT_FACTOR = '9';
-    assert.equal(timingFactor(), 4, '超出上限 clamp 到 4');
+    assert.equal(timingFactor(), 8, '超出上限 clamp 到 8');
     process.env.VISION_TEST_TIMEOUT_FACTOR = '0';
     assert.equal(timingFactor(), 1);
     process.env.VISION_TEST_TIMEOUT_FACTOR = '-3';
