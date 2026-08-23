@@ -1,8 +1,3 @@
-<!--
-  约定：只保留最新一期更新内容（旧版本内容不留——README 与 Release changelog 均只展示最近一次更新）。
-  本文件内容 = GitHub Release 的 changelog 栏（由 .github/workflows/release.yml 自动读取；发版前更新为最新一期）。
--->
-
 ## v0.1.4（2026-08-23）
 
 **本次更新完全由 DeepSeek Harness 自主完成。**
