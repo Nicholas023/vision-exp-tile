@@ -44,7 +44,12 @@ const SETTINGS_ENV_KEYS = [
   'DSH_INTEREST_CONCURRENCY',
   'DSH_OCR_POOL',
   'DSH_OCR_CACHE',
-  'DSH_OCR_PREPROC'
+  'DSH_OCR_PREPROC',
+  // v0.4.0：GPU 加速相关
+  'DSH_OCR_GPU_PROVIDER',
+  'DSH_OCR_GPU_PYTHON',
+  'DSH_OCR_GPU_DEVICE',
+  'DSH_OCR_GPU_FALLBACK'
 ];
 
 /**
@@ -162,6 +167,19 @@ export function envFromSettings(raw) {
   // DSH_OCR_PREPROC：true=不设置（默认开）；false="0"。
   if (v.ocr_preproc === false) out.DSH_OCR_PREPROC = '0';
 
+  // v0.4.0：GPU 加速。auto/空/true 默认不设置（交模块自动探测/默认），非默认才显式写。
+  // provider：auto=不设置（自动探测）；cuda/dml/openvino/off 显式写。
+  const gp = String(v.gpu_provider ?? 'auto').trim();
+  if (gp !== '' && gp !== 'auto') out.DSH_OCR_GPU_PROVIDER = gp;
+  // python 路径：非空即写。
+  const gpy = String(v.gpu_python ?? '').trim();
+  if (gpy !== '') out.DSH_OCR_GPU_PYTHON = gpy;
+  // device：auto/空=不设置；其他（含数字）写。
+  const gdev = String(v.gpu_device ?? 'auto').trim();
+  if (gdev !== '' && gdev !== 'auto') out.DSH_OCR_GPU_DEVICE = gdev;
+  // fallback：true=不设置（默认开）；false="0"。
+  if (v.gpu_fallback === false) out.DSH_OCR_GPU_FALLBACK = '0';
+
   return out;
 }
 
@@ -235,6 +253,11 @@ export function normalizeFromSettings(raw) {
     ocr_pool: Number.isFinite(Number(v.ocr_pool)) ? Number(v.ocr_pool) : 4,
     ocr_cache: v.ocr_cache === undefined ? true : Boolean(v.ocr_cache),
     ocr_preproc: v.ocr_preproc === undefined ? true : Boolean(v.ocr_preproc),
-    debug: v.debug === true
+    debug: v.debug === true,
+    // v0.4.0：GPU 参数透传（供工具读取）
+    gpu_provider: String(v.gpu_provider ?? 'auto'),
+    gpu_python: String(v.gpu_python ?? ''),
+    gpu_device: String(v.gpu_device ?? 'auto'),
+    gpu_fallback: v.gpu_fallback === undefined ? true : Boolean(v.gpu_fallback)
   };
 }

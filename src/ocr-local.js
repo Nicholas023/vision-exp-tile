@@ -103,8 +103,13 @@ function ocrPool(engineUsed) {
       const worker = join(__dirnameLocal, 'ocr-win-worker.ps1');
       return getOcrPool('powershell.exe', undefined, worker);
     }
-    const py = engineUsed === 'paddle' ? paddlePython() : rapidPython();
-    return getOcrPool(py);
+    // v0.4.0：gpu 走独立 GPU venv 池；paddle 走 paddle venv；其余 rapid 走 CPU venv
+    let py;
+    if (engineUsed === 'paddle') py = paddlePython();
+    else if (engineUsed === 'gpu') py = gpuPython();
+    else py = rapidPython();
+    if (!py) return null; // venv 缺失 → 上层走单进程兜底
+    return getOcrPool(py, undefined, undefined, gpuPoolTimeoutMs());
   } catch {
     return null;
   }
@@ -134,6 +139,15 @@ export function rapidPython() {
   return process.env.DSH_RAPID_PYTHON ?? venvPython(join(homedir(), 'rapid_venv'));
 }
 
+/**
+ * RapidOCR GPU venv Python（v0.4.0：独立 GPU venv，DSH_OCR_GPU_PYTHON 覆盖）。
+ * 默认 ~/rapid_gpu_venv；venv 缺失（解释器不存在）即返回 null，上层据此回退 rapid(CPU)。
+ */
+export function gpuPython() {
+  const p = process.env.DSH_OCR_GPU_PYTHON ?? venvPython(join(homedir(), 'rapid_gpu_venv'));
+  return existsSync(p) ? p : null;
+}
+
 /** PaddleX 模型缓存目录（环境变量覆盖 > $HOME/.paddlex-cache） */
 export function paddleCacheHome() {
   return process.env.DSH_PADDLE_CACHE ?? join(homedir(), '.paddlex-cache');
@@ -143,6 +157,43 @@ export function paddleCacheHome() {
 const availableCache = new Map();
 const AVAILABLE_TTL_MS = 60_000;
 
+/** v0.4.0：GPU 运行时失败标记——一旦 GPU 池请求报错即置位，auto/gpu 探测随后跳过 GPU，
+ *  避免每张图都重试失败的 GPU，与 worker 内 _gpu_ok=False 互补（Node 侧进程级记忆）。 */
+let gpuRuntimeFailed = false;
+export function gpuRuntimeFailedFlag() { return gpuRuntimeFailed; }
+export function setGpuRuntimeFailed(v = true) { gpuRuntimeFailed = v; }
+
+/** 测试可注入的引擎可用性探测覆盖（默认 null=用真实 engineAvailable；测试可 mock 探测/venv 存在性）。 */
+let _engineAvailableOverride = null;
+export function _setEngineAvailableOverride(fn) { _engineAvailableOverride = typeof fn === 'function' ? fn : null; }
+
+/** v0.4.0：GPU 池超时（毫秒），可配置（DSH_OCR_GPU_POOL_TIMEOUT），默认 120s（覆盖 30s 冷启动）。 */
+function gpuPoolTimeoutMs() {
+  const raw = Number(process.env.DSH_OCR_GPU_POOL_TIMEOUT);
+  return (Number.isFinite(raw) && raw > 0) ? raw : 120_000;
+}
+
+/**
+ * v0.4.0：纯函数——按 DSH_OCR_GPU_PROVIDER 与 onnxruntime 实际可用 provider 列表解析最终 EP。
+ * 与 src/ocr-worker.py 的 _resolve_gpu_provider 采用同一套决策表（Node 侧测试镜像）。
+ *   取值：cuda/dml/openvino/off/auto；auto=优先 cuda→dml→openvino→cpu；
+ *   显式 EP 不在 available 中则回退 cpu；off=强制 cpu。
+ * @param {string} [envProvider] - DSH_OCR_GPU_PROVIDER 值
+ * @param {string[]} [availableProviders] - onnxruntime get_available_providers()
+ * @returns {'cuda'|'dml'|'openvino'|'cpu'}
+ */
+export function resolveGpuProvider(envProvider, availableProviders) {
+  const raw = String(envProvider ?? 'auto').trim().toLowerCase();
+  const avail = new Set(availableProviders ?? []);
+  const map = { cuda: 'CUDAExecutionProvider', dml: 'DmlExecutionProvider', openvino: 'OpenVINOExecutionProvider' };
+  if (raw === 'off') return 'cpu';
+  if (raw in map) return avail.has(map[raw]) ? raw : 'cpu';
+  if (avail.has('CUDAExecutionProvider')) return 'cuda';
+  if (avail.has('DmlExecutionProvider')) return 'dml';
+  if (avail.has('OpenVINOExecutionProvider')) return 'openvino';
+  return 'cpu';
+}
+
 /** 探测某引擎环境是否可用（Paddle 会额外等待模型 import ~2s；结果缓存 60s）。
  *  附带检查：常驻池的 python worker 脚本存在（"无 Python"形态的包剔除了 ocr-worker.py，
  *  此时 paddle/rapid 视为不可用 → 自动降级 Windows OCR）。 */
@@ -151,8 +202,9 @@ export async function engineAvailable(engine) {
   if (engine === 'windows') return process.platform === 'win32';
   const cached = availableCache.get(engine);
   if (cached && Date.now() - cached.at < AVAILABLE_TTL_MS) return cached.ok;
-  const python = engine === 'paddle' ? paddlePython() : rapidPython();
-  if (!existsSync(python)) { availableCache.set(engine, { at: Date.now(), ok: false }); return false; }
+  // v0.4.0：gpu 引擎挂到独立 GPU venv（gpuPython）；其余同现逻辑
+  const python = engine === 'paddle' ? paddlePython() : (engine === 'gpu' ? gpuPython() : rapidPython());
+  if (!python || !existsSync(python)) { availableCache.set(engine, { at: Date.now(), ok: false }); return false; }
   // 池模式要求 python worker 脚本存在（无 Python 形态：缺失 → 引擎判定不可用）
   if (!existsSync(join(__dirnameLocal, 'ocr-worker.py'))) { availableCache.set(engine, { at: Date.now(), ok: false }); return false; }
   return new Promise((resolve) => {
@@ -189,10 +241,24 @@ export async function engineAvailable(engine) {
  */
 export async function resolveEngine(preferred) {
   const raw = String(process.env.DSH_OCR_ENGINE ?? '').trim();
+  // 引擎可用性探测（测试可经 _setEngineAvailableOverride mock 探测/venv 存在性）
+  const probe = (eng) => (_engineAvailableOverride ? _engineAvailableOverride(eng) : engineAvailable(eng));
+  // v0.4.0：gpu / auto 引擎先探测 GPU（沿用 60s 探测缓存）。
+  //   默认（DSH_OCR_ENGINE 未设置/空）不探测 GPU，保持现状 → 向后兼容。
+  if (raw === 'gpu' || raw === 'auto') {
+    const gpuOk = !gpuRuntimeFailed && (await probe('gpu'));
+    if (gpuOk) return 'gpu';
+    if (raw === 'gpu') {
+      // gpu 强制但 venv 缺失/上次失败 → 回退 rapid(CPU)
+      if (await probe('rapid')) return 'rapid';
+      return 'windows';
+    }
+    // auto：探测失败 → 落到下方默认顺序（rapid 优先，兼容现状）
+  }
   const first = raw === 'paddle' || raw === 'rapid' ? raw : (preferred ?? 'rapid');
   const order = first === 'paddle' ? ['paddle', 'rapid', 'windows'] : ['rapid', 'paddle', 'windows'];
   for (const eng of order) {
-    if (await engineAvailable(eng)) return eng;
+    if (await probe(eng)) return eng;
   }
   return 'windows'; // 兜底
 }
@@ -319,7 +385,7 @@ function runPaddleOcr(pngPath, timeoutMs = 120_000) {
  * RapidOCR（rapid_venv，bundled ONNX 模型，无需网络下载）。
  * 脚本编写参考自开源项目 picturereader（MIT）的 runRapidOcr：进程参数传 PNG 路径，stdout JSON。
  */
-function runRapidOcr(pngPath, timeoutMs = 90_000) {
+function runRapidOcr(pngPath, timeoutMs = 90_000, python = rapidPython()) {
   const script = [
     'import json, sys',
     'from rapidocr_onnxruntime import RapidOCR',
@@ -333,7 +399,7 @@ function runRapidOcr(pngPath, timeoutMs = 90_000) {
     "print(json.dumps({'lines': _out}, ensure_ascii=False), flush=True)"
   ].join('\n');
   return new Promise((resolve, reject) => {
-    const child = spawn(rapidPython(), ['-c', script, String(pngPath)], {
+    const child = spawn(python, ['-c', script, String(pngPath)], {
       env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
       windowsHide: true
     });
@@ -414,14 +480,16 @@ export async function ocrText(pngBuffer, { engine = 'auto', timeoutMs, preproces
         }));
         const entry = {
           engine: engineUsed, text: lines.map((l) => l.text).join('\n'), lines, pooled: true,
-          preprocess: preApplied, isDark
+          preprocess: preApplied, isDark,
+          provider: resp.provider, gpu_device: resp.gpu_device
         };
         await ocrCacheSet(cacheKey, entry);
         return entry;
       } catch (poolErr) {
         // 池失败（worker 超时/崩溃）→ 回退旧实现（每张一进程），绝不因池而丢失识别
+        if (engineUsed === 'gpu') setGpuRuntimeFailed(); // GPU 池失败 → 标记，后续不再尝试 GPU
         if (engineUsed === 'paddle') result = await runPaddleOcr(tmpPath, timeoutMs);
-        else if (engineUsed === 'rapid') result = await runRapidOcr(tmpPath, timeoutMs);
+        else if (engineUsed === 'rapid' || engineUsed === 'gpu') result = await runRapidOcr(tmpPath, timeoutMs, ((engineUsed === 'gpu' ? gpuPython() : rapidPython()) ?? rapidPython()));
         else result = await runWindowsOcr(tmpPath, timeoutMs);
         const lines = result.lines ?? [];
         const entry = {
@@ -435,7 +503,7 @@ export async function ocrText(pngBuffer, { engine = 'auto', timeoutMs, preproces
     }
     // —— 旧路径/Windows 引擎 ——
     if (engineUsed === 'paddle') result = await runPaddleOcr(tmpPath, timeoutMs);
-    else if (engineUsed === 'rapid') result = await runRapidOcr(tmpPath, timeoutMs);
+    else if (engineUsed === 'rapid' || engineUsed === 'gpu') result = await runRapidOcr(tmpPath, timeoutMs, ((engineUsed === 'gpu' ? gpuPython() : rapidPython()) ?? rapidPython()));
     else result = await runWindowsOcr(tmpPath, timeoutMs);
     // 统一输出：[按行拼接文本 + 行像素框]
     const lines = result.lines ?? [];

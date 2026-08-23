@@ -261,7 +261,7 @@ function installExitHook() {
  * @param {string} [workerPath] - worker 脚本路径（默认 src/ocr-worker.py；Windows OCR 用 ocr-win-worker.ps1）
  * @returns {OcrPool|null} 禁用时返回 null（上游回退旧逻辑）
  */
-export function getOcrPool(pythonCmd, factor, workerPath) {
+export function getOcrPool(pythonCmd, factor, workerPath, timeoutMs) {
   const size = factor ?? poolSizeFromEnv();
   if (size <= 0) return null;
   installExitHook();
@@ -269,7 +269,10 @@ export function getOcrPool(pythonCmd, factor, workerPath) {
   const key = workerPath ? `${pythonCmd}::${workerPath}` : pythonCmd;
   let pool = poolRegistry.get(key);
   if (!pool) {
-    pool = new OcrPool({ size, pythonCmd, workerPath });
+    // v0.4.0：timeoutMs 第 4 参，供 GPU 池按场景放宽冷启动（默认 120s 不变）
+    const opts = { size, pythonCmd, workerPath };
+    if (timeoutMs !== undefined) opts.timeoutMs = timeoutMs;
+    pool = new OcrPool(opts);
     poolRegistry.set(key, pool);
   }
   return pool;

@@ -1,7 +1,27 @@
 # 更新日志（Release Changelog）
 
-> 全部版本记录（v0.1.0 → v0.3.1），最新在上；本文件 = GitHub Release 的 changelog 栏（由 .github/workflows/release.yml 自动读取）。
+> 全部版本记录（v0.1.0 → v0.4.0），最新在上；本文件 = GitHub Release 的 changelog 栏（由 .github/workflows/release.yml 自动读取）。
 > 注：README 只展示最新一期更新内容（使用者视角）；本文件保留每期完整记录（含历史）。
+
+## v0.4.0（2026-08-23）
+
+**本次更新完全由 DeepSeek Harness 自主完成。**
+
+### 新功能
+
+1. **GPU 多设备加速（可选能力）**：
+   - 新增 `DSH_OCR_ENGINE=gpu/auto` 引擎模式；新增设置项 `gpu_provider`（auto/cuda/dml/openvino/off）、`gpu_python`、`gpu_device`、`gpu_fallback`（设置页「图像识别」分区同步 4 新字段 + ocr_engine 枚举加 Gpu）；
+   - **DirectML 一个引擎覆盖 NVIDIA/AMD/Intel 全厂商**（Windows）；CUDA（NVIDIA 极致）/OpenVINO（Intel）可选；`auto` 自动探测 → 不可用自动回退 CPU（`gpu_fallback` 可关）；
+   - 独立 GPU venv（rapid_gpu_venv，onnxruntime-directml 1.24.4 + rapidocr 1.4.4），**不污染原 rapid_venv**；
+   - **性能口径（务必如实）**：单进程实测 DML ~208ms vs CPU ~329ms（约 1.5×）；但在插件 4 并发进程池模式下 DML 反慢于 CPU（端到端 DML 2604ms vs CPU 1307ms/张）→ **定位为"可选加速能力（默认不启用）"**，文档表述为"按需开启；多厂商显卡兼容；自动回退保底"，**禁止宣称"GPU 总体提速 X 倍"**；
+2. **引擎选择增强**：resolveEngine 支持 gpu/auto（默认 rapid 行为不变，向后兼容；设置页引擎下拉新增 Gpu/Auto）。
+3. 其余：ocr-pool 支持按引擎区分超时（GPU 冷启动放宽）；runtime env 映射 4 个 DSH_OCR_GPU_* 键；worker 响应带 provider/gpu_device 调试信息。
+
+### 验证
+
+单测 **111/111** 全绿（原 96 + 新增 gpu.test.js 15 项）；E2E：离线真实 OCR（DSH_OCR_CACHE=0）4/4；真机 4 轮（含 pipeline/region_crop/preview 真 API，API 14/20）4/4；GPU 冒烟四路径（dml/自动回退/off/auto）全过。
+
+---
 
 ## v0.3.1（2026-08-23）
 

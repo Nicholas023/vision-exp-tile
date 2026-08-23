@@ -115,6 +115,23 @@ export const SettingsSchema = z.object({
     .boolean()
     .default(true)
     .description('高级：OCR 前处理开关。true=启用（默认，不设环境变量）；false=设 DSH_OCR_PREPROC=0 禁用'),
+  // ── v0.4.0：GPU 多设备加速 ────────────────────────────────────────────
+  gpu_provider: z
+    .string()
+    .default('auto')
+    .description('高级：GPU 推理 provider：auto=按设备探测（优先 cuda→dml→openvino→cpu，默认）/ cuda / dml / openvino / off（强制 CPU）。映射环境变量 DSH_OCR_GPU_PROVIDER'),
+  gpu_python: z
+    .string()
+    .default('')
+    .description('高级：GPU venv 解释器路径；空=用 ~/rapid_gpu_venv/Scripts/python.exe。映射环境变量 DSH_OCR_GPU_PYTHON'),
+  gpu_device: z
+    .string()
+    .default('auto')
+    .description('高级：GPU 设备索引（dml=D3D12 适配器索引 / cuda=GPU 索引）；auto=默认适配器（不硬选 NVIDIA）。映射环境变量 DSH_OCR_GPU_DEVICE'),
+  gpu_fallback: z
+    .boolean()
+    .default(true)
+    .description('高级：GPU 初始化/推理失败时是否回退 CPU。true=回退（默认）；false=直接报错（调试用）。映射环境变量 DSH_OCR_GPU_FALLBACK'),
   debug: z.boolean().default(false).description('高级：调试日志（写日志，不映射环境变量）'),
 });
 
@@ -127,7 +144,7 @@ export const SettingsSchema = z.object({
  */
 export const SETTINGS_FIELDS = [
   // 基础
-  { key: 'ocr_engine', type: 'enum', labelKey: 'ocrEngine', advanced: false, options: ['auto', 'windows', 'paddle', 'rapid'], envKey: 'DSH_OCR_ENGINE' },
+  { key: 'ocr_engine', type: 'enum', labelKey: 'ocrEngine', advanced: false, options: ['auto', 'windows', 'paddle', 'rapid', 'gpu'], envKey: 'DSH_OCR_ENGINE' },
   { key: 'preprocess', type: 'enum', labelKey: 'preprocess', advanced: false, options: ['auto', 'off', 'auto-enlarge-off'] },
   { key: 'handwrite_route', type: 'enum', labelKey: 'handwriteRoute', advanced: false, options: ['smart', 'visual', 'local', 'off'], envKey: 'DSH_OCR_HANDWRITE' },
   { key: 'upgrade', type: 'enum', labelKey: 'upgrade', advanced: false, options: ['full', 'low', 'off'], envKey: 'DSH_OCR_UPGRADE' },
@@ -152,6 +169,11 @@ export const SETTINGS_FIELDS = [
   { key: 'ocr_pool', type: 'number', labelKey: 'ocrPool', advanced: true, configKey: 'ocrPool', envKey: 'DSH_OCR_POOL' },
   { key: 'ocr_cache', type: 'boolean', labelKey: 'ocrCache', advanced: true, configKey: 'ocrCache', envKey: 'DSH_OCR_CACHE' },
   { key: 'ocr_preproc', type: 'boolean', labelKey: 'ocrPreproc', advanced: true, configKey: 'ocrPreproc', envKey: 'DSH_OCR_PREPROC' },
+  // v0.4.0：GPU 多设备加速
+  { key: 'gpu_provider', type: 'enum', labelKey: 'gpuProvider', advanced: true, options: ['auto', 'cuda', 'dml', 'openvino', 'off'], envKey: 'DSH_OCR_GPU_PROVIDER', configKey: 'gpuProvider' },
+  { key: 'gpu_python', type: 'text', labelKey: 'gpuPython', advanced: true, envKey: 'DSH_OCR_GPU_PYTHON', configKey: 'gpuPython' },
+  { key: 'gpu_device', type: 'text', labelKey: 'gpuDevice', advanced: true, envKey: 'DSH_OCR_GPU_DEVICE', configKey: 'gpuDevice' },
+  { key: 'gpu_fallback', type: 'boolean', labelKey: 'gpuFallback', advanced: true, envKey: 'DSH_OCR_GPU_FALLBACK', configKey: 'gpuFallback' },
   { key: 'debug', type: 'boolean', labelKey: 'debug', advanced: true },
 ];
 

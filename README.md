@@ -6,10 +6,11 @@
 
 各位随意取用：有问题可以提交 **Issue**（如果能自己改的话就更好了——你提交了 Issue，我也只能给 DeepSeek 看然后让他自己改；我本人尝试过多次，均未学会任何写代码的能力，也是乘上 **AI** 的东风，让我有了开发插件的能力）。
 
-> **本次更新（v0.3.1）完全由 DeepSeek Harness 自主完成**，内容：
-> ① **修复 DSH 0.1.1-rc.2 兼容**：客户端 settingsScope 在新版 DSH 上可能没有 load() 方法（picturereader 3.0.6 同款防御）——修复后「图像识别」设置分区在 rc.2 上内容正常显示（不再空白）；
-> ② **发布资产修正**：v0.3.0 的 zip 曾漏打包 client.js（设置界面文件），v0.3.1 起双形态 zip 已包含；v0.3.0 资产已同步补正；
-> ③ 本机全部适应性改造（DSH 升级 rc.2 + 插件共存适配）已同步入此版本。
+> **本次更新（v0.4.0）完全由 DeepSeek Harness 自主完成**，内容：
+> ① **GPU 多设备加速（可选能力）**：复习考的课件/真题大图想识别得更快，可在设置页「图像识别」分区把本地 OCR 切到 `gpu`——**DirectML 一个引擎覆盖 NVIDIA/AMD/Intel 全厂商**（Windows），CUDA（NVIDIA）/OpenVINO（Intel）可选；`auto` 自动探测、显卡不可用时自动回退 CPU（`gpu_fallback` 可关）；
+> ② **按需开启（不是无脑提速）**：单进程实测 DML 比 CPU 快约 **1.5×**；但插件默认 4 并发进程池模式下 GPU 反而更慢——所以定位为"可选加速能力（默认不启用）"，确有大图要加速时再手动切，**不是"总体提速 X 倍"**；
+> ③ **设置页增强**：新增 `gpu_provider`/`gpu_python`/`gpu_device`/`gpu_fallback` 四个字段 + 引擎下拉新增 Gpu/Auto；默认 rapid 行为不变（向后兼容，无需改配置）；
+> ④ **安装方式不变**：复制/链接插件到插件目录 + 挂 `link:` 依赖即可，同此前各版。
 
 # vision-exp-tile ◆ 为 deepseek-v4-flash-vision-exp 定制的大图智能识图插件
 
@@ -17,7 +18,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org)
-[![version](https://img.shields.io/badge/vision--exp--tile-v0.3.1-orange.svg)](#)
+[![version](https://img.shields.io/badge/vision--exp--tile-v0.4.0-orange.svg)](#)
 [![DSH](https://img.shields.io/badge/DeepSeek%20Harness-plugin-purple.svg)](#)
 
 > 独立 DSH 插件：**零依赖任何第三方 DSH 插件**（picturereader 等均未使用，仅用纯官方 DSH 服务 + 可选开源 OCR 环境）。把大图切成 **800×800 无损小块**（官方缩放规则的"甜蜜点"：块在模型侧**不被降采样**、每块**≤384 token**），携带**坐标标注 + 分块聚合逻辑**直接调用 DeepSeek 视觉 API 完成识别与聚合，返回结构化答案（**不统计 token、不计算费用**）。
@@ -34,7 +35,7 @@
 
 ```powershell
 # 1. 复制/链接插件到 DSH 插件目录（与 picturereader 同款形态）
-#    本项目已经用 junction 链接：C:\Users\HP\.dsh\plugins\vision-exp-tile
+#    安装方式 = link 依赖安装到插件目录：把插件源码放到 DSH 插件目录，再在目标 profile 以 link: 依赖挂载
 
 # 2. 在目标 profile 的 package.json 中：
 #    "dsh": { "profile": { "bundles": [ ..., "vision-exp-tile" ] } }
@@ -50,7 +51,7 @@
 
 ```powershell
 # 测试 profile：~/.dsh/profiles/vision-test（bundles = dsh-base + dsh-web-app + vision-exp-tile）
-dsh --profile vision-test web --port 3081
+dsh --profile vision-test --port 3081
 # 浏览器打开 http://127.0.0.1:3081 即可测试；正式 profile 与本次改动零关联。
 ```
 
@@ -148,7 +149,7 @@ dsh web
 
 1. `npm test`：网格/坐标/提示模板/mock API 全部通过；
 2. `dsh --profile vision-test --dump-config`：输出树中应出现 `vision-exp-tile` 行；
-3. 启动 `dsh --profile vision-test web --port 3081` → 新会话 → 工具列表出现 `vision_tile_split` / `vision_tile_recognize`；
+3. 启动 `dsh --profile vision-test --port 3081` → 新会话 → 工具列表出现 `vision_tile_split` / `vision_tile_recognize`；
 4. 上传一张 4000×3000 测试图 → 调 `vision_tile_split` → 检查输出目录 20 块 + overview + 坐标清单；
 5. 调 `vision_tile_recognize`（需环境变量 `DEEPSEEK_API_KEY` 有值）→ 检查结构化识别答案与统计（不显示 token/费用）。
 
