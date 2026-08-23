@@ -1,0 +1,61 @@
+# vision-exp-tile 自动发布工作流（GitHub Actions）
+#
+# 触发：推送 v* 标签（如 v0.1.3）→ 自动：
+#   1) 安装依赖  2) 运行单元测试（npm test）  3) 打包 **两个** Release 资产 zip
+#      - vision-exp-tile-v<版本>.zip        ：完整版（含 Python OCR 引擎支持，venv 可选）
+#      - vision-exp-tile-v<版本>-nopython.zip：无 Python 零配置版（本地识别 = Windows OCR 常驻池；
+#                                              剔除 src/ocr-worker.py）
+#   4) 创建 GitHub Release 并附上两个 zip
+#
+# 使用：git tag v0.1.3 && git push origin v0.1.3   即可（或网页打 tag）
+# 首次使用无需配置：仓库默认启用 Actions；GITHUB_TOKEN 自动提供。
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # 创建 Release 必需
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 运行单元测试
+        run: npm test
+
+      - name: 打包 Release 资产（两个 zip：完整版 + 无 Python 零配置版）
+        shell: bash
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          # 1) 完整版：全部源码（含 ocr-worker.py 常驻 Python 引擎支持）
+          zip -r "dist/vision-exp-tile-v${VER}.zip" \
+            src tests scripts package.json README.md LICENSE cordis.patch.yml .gitignore \
+            -x '*/node_modules/*'
+          # 2) 无 Python 零配置版：剔除 ocr-worker.py（本地识别自动降级为 Windows OCR 常驻池）
+          zip -r "dist/vision-exp-tile-v${VER}-nopython.zip" \
+            src tests scripts package.json README.md LICENSE cordis.patch.yml .gitignore \
+            -x '*/node_modules/*' -x 'src/ocr-worker.py'
+          echo "已生成："
+          ls -lh dist/
+
+      - name: 创建 GitHub Release 并附资产
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/vision-exp-tile-v*.zip

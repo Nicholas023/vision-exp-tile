@@ -1,0 +1,31 @@
+# 依赖与构建产物（node_modules 由安装者自行安装）
+node_modules/
+*.tgz
+
+# 测试/临时产物
+tmp/
+dist/
+*.log
+.tmp
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# DSH 本地运行痕迹（绝不上传）
+.credentials.yaml
+*.bak-vision-exp-tile
+
+# 本机工作文档与历史发布目录（不进 GitHub 发布仓库）
+release-v0.1.0/
+release-v0.1.1/
+release-v0.1.2/
+NEXT-GOAL-*.md
+OCR优化记录*.md
+排查记录-*.md
+更新说明-*.md
+DEBUG-REPORT.md
+BUILD-RELEASE.md
