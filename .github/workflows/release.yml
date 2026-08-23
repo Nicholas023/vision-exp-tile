@@ -58,10 +58,10 @@ jobs:
         shell: bash
         run: |
           VER="${GITHUB_REF_NAME#v}"
-          # 提取 "## v${VER}" 段落（到下一个 "## v" 为止）
-          awk -v ver="v${VER}" '
-            $0 ~ /^## v/ && $2 == ver { take = 1; next }
-            $0 ~ /^## v/ { take = 0 }
+          # 提取 "## vX.Y.Z（" 段落（到下一个 "## v" 段落为止；标题含日期后缀需按前缀匹配）
+          awk -v ver="## v${VER}（" '
+            $0 ~ /^## v[0-9]/ && index($0, ver) == 1 { take = 1; next }
+            $0 ~ /^## v[0-9]/ { take = 0 }
             take { print }
           ' CHANGELOG.md > notes.md
           echo "--- notes.md 标题 ---"; grep -m1 '^## ' notes.md || echo '(未找到对应段落，请检查 CHANGELOG.md 是否已更新！)'
