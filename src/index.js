@@ -465,7 +465,7 @@ export function createRecognizeTool(ctx, cfg) {
       '智能识图（deepseek-v4-flash-vision-exp）：先整图预检 → 按需本地 OCR + 重点区域按比例切块识别 → 汇总。',
       '参数：file_path（必填）；strategy（enum[smart/pipeline/full]，默认 smart）：smart=模型编排（预检后由模型决定后续，可先问用户）；pipeline=插件全自动（预检→本地OCR→兴趣点识别→汇总一次完成，无交互）；full=原全图网格切块识别（先 overview 缩略图再切块，用于整页材料逐块转录）。',
       '通用参数：question（string，默认“完整识别大图内容”；可描述重点区域让模型优先）；rotate（0/90/180/270，默认 0，图片横倒/倒置时使用）；max_tokens（默认 8192）；json（仅 full 模式有效）。',
-      'pipeline 模式追加：ocr_engine（auto/paddle/rapid/windows，默认 auto=优先 rapid 自动降级）；interest_concurrency（兴趣点 API 并行数 1..4，默认 2）；block_size/cut_threshold/overlap/group_size/format/quality/out_dir/with_overview 仅 full 模式有效。',
+      'pipeline 模式追加：ocr_engine（auto/paddle/rapid/windows，默认 auto=优先 rapid 自动降级）；interest_concurrency（兴趣点 API 并行数 1..4，默认 2）；preprocess（auto/off，默认 auto=深底自动反色/低对比二值化/手写放大）；upgrade（full/low/off，默认 full=低置信或手写或深底失败时自动升级视觉 API 转录）；block_size/cut_threshold/overlap/group_size/format/quality/out_dir/with_overview 仅 full 模式有效。',
       'smart 模式流程（请模型按此执行）：1) 本工具先返回预检结果（有无文字、文字区域、兴趣点区域、整图概要）；2) 若重点内容不明确，先向用户提问；3) 文字区域→vision_region_crop(recognize=true) 视觉直读转录（本插件自带能力，跨环境可用）；4) 兴趣点→vision_region_crop(recognize=true) 逐点识别；5) 汇总成完整答案。',
       '读取 API key：从环境变量（默认 DEEPSEEK_API_KEY）读取；未配置会给出明确提示。',
       '返回：预检清单/整体答案 + 统计（模式、区域数、请求数）。不统计 token、不计算费用。'
@@ -480,6 +480,8 @@ export function createRecognizeTool(ctx, cfg) {
         rotate: { type: 'integer', enum: [0, 90, 180, 270], description: '识别前顺时针旋转角度（0/90/180/270）。图片横倒/倒置时使用，默认 0。' },
         ocr_engine: { type: 'string', enum: ['auto', 'paddle', 'rapid', 'windows'], description: 'pipeline 模式本地 OCR 引擎；auto=优先 rapid 自动降级。默认 auto。' },
         interest_concurrency: { type: 'integer', description: 'pipeline 模式兴趣点视觉识别并行数（1..4，默认 2；并发可提速但过大易触发 429）。' },
+        preprocess: { type: 'string', enum: ['auto', 'off'], description: 'pipeline 模式 OCR 前处理；auto=深底自动反色/低对比二值化/手写放大（默认）；off=关闭。' },
+        upgrade: { type: 'string', enum: ['full', 'low', 'off'], description: 'pipeline 模式自动升级：full=低置信或手写或深底失败时自动转视觉 API 转录（默认）；low=仅低置信；off=关闭。' },
         mode: { type: 'string', enum: ['auto', 'single', 'layered'], description: '仅 strategy=full 有效：块数≤60单请求，否则分层聚合。默认 auto。' },
         group_size: { type: 'integer', description: '仅 full：分层聚合每组最多块数（1..240）。默认 40。' },
         json: { type: 'boolean', description: '仅 full：true=输出 JSON 对象（结构化）。默认 false。' },
@@ -639,6 +641,10 @@ export function createRecognizeTool(ctx, cfg) {
         const interestConcurrency = args.interest_concurrency === undefined
           ? undefined
           : readInt(args.interest_concurrency, 2, 1, 4, 'interest_concurrency', tool);
+        const preprocessMode = args.preprocess === 'off' ? 'off' : 'auto';
+        const upgradeMode = ['full', 'low', 'off'].includes(String(args.upgrade ?? ''))
+          ? String(args.upgrade)
+          : 'default';
         const p = await runPipeline({
           apiKey,
           baseURL: cfg.baseURL,
@@ -651,6 +657,8 @@ export function createRecognizeTool(ctx, cfg) {
           rotate: img.rotate ?? 0,
           ocrEngine: ocrEngineRaw,
           interestConcurrency,
+          preprocess: preprocessMode,
+          upgrade: upgradeMode,
           maxTokens,
           signal: exec.signal,
           timeoutMs: cfg.timeoutMs

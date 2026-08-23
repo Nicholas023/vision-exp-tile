@@ -42,16 +42,39 @@ def get_paddle(timeout_ms=None):
         with _lock:
             engine = _engines.get("paddle")
             if engine is None:
-                # 与 ocr-local.js 旧脚本保持同样配置（mkldnn 关闭是因为 PIR+oneDNN
-                # 在 paddle 3.3.1 下不兼容，开启会抛 NotImplementedError——保护性关闭）
+                # mkldnn 关闭（PIR+oneDNN 不兼容，开启会抛 NotImplementedError——保护性）
                 from paddleocr import PaddleOCR
-                engine = PaddleOCR(
+                kwargs = dict(
                     lang="ch",
                     use_doc_orientation_classify=False,
                     use_doc_unwarping=False,
                     use_textline_orientation=False,
                     enable_mkldnn=False,
                 )
+                # v0.2.0：检测侧调参（密集小字/手写更宽容，环境变量可配）
+                if os.environ.get("DSH_PADDLE_DET_LIMIT"):
+                    try:
+                        kwargs["text_det_limit_side_len"] = int(os.environ["DSH_PADDLE_DET_LIMIT"])
+                    except Exception:
+                        pass
+                if os.environ.get("DSH_PADDLE_DET_THRESH"):
+                    try:
+                        kwargs["text_det_thresh"] = float(os.environ["DSH_PADDLE_DET_THRESH"])
+                    except Exception:
+                        pass
+                # v0.2.0：DSH_OCR_MODEL=server → 高精度识别模型 PP-OCRv4_server_rec
+                # （首次自动下载几十 MB；失败自动回退默认模型并记录）
+                model_env = (os.environ.get("DSH_OCR_MODEL") or "default").strip().lower()
+                if model_env in ("server", "v4server"):
+                    try:
+                        kwargs["text_recognition_model_name"] = "PP-OCRv4_server_rec"
+                        engine = PaddleOCR(**kwargs)
+                        _engines["paddle"] = engine
+                        return engine
+                    except Exception as e:
+                        print(f"[ocr-worker] Paddle server 模型不可用，回退默认：{str(e)[:120]}", file=sys.stderr)
+                        engine = None
+                engine = PaddleOCR(**kwargs)
                 _engines["paddle"] = engine
     return engine
 

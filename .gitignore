@@ -29,3 +29,12 @@ OCR优化记录*.md
 更新说明-*.md
 DEBUG-REPORT.md
 BUILD-RELEASE.md
+
+# v0.2.0 开发者文档（本机留存，不进 GitHub 发布仓库）
+可行性验证-v0.2.0.md
+发布总结-v0.2.0.md
+变更说明-v0.2.0.md
+离线强化-v0.2.0.md
+DEBUG-REPORT-v0.2.0.md
+scripts/e2e-out/
+运行日志-*.txt

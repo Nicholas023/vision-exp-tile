@@ -6,15 +6,13 @@
 
 各位随意取用：有问题可以提交 **Issue**（如果能自己改的话就更好了——你提交了 Issue，我也只能给 DeepSeek 看然后让他自己改；我本人尝试过多次，均未学会任何写代码的能力，也是乘上 **AI** 的东风，让我有了开发插件的能力）。
 
-> **本次更新（v0.1.4）完全由 DeepSeek Harness 自主完成**，内容：
-> ① **本地 OCR 检索缓存**：同图重复识别命中秒出（默认 48h；`DSH_OCR_CACHE=0` 关闭）——省钱又省时（本地缓存命中≈0 API）；
-> ② **重点区域并行识别**（默认 2 路，`DSH_INTEREST_CONCURRENCY` 或工具参数 `interest_concurrency` 可调 1-4）——整卷大图等待时间再减一半；
-> ③ **置信度自适应升级**：OCR 平均置信度 < 0.85 的区域自动切换视觉 API 转录（更快与更准自动取舍）；
-> ④ **429/5xx 指数退避重试** + **损坏图/HEIC 友好提示** + **跨块表格/长句行对齐增强** + Windows OCR 中文引擎缺失指引；
-> ⑤ 暴露高级参数：`ocr_engine` / `interest_concurrency`（向后兼容，缺省行为不变）；
-> ⑥ **双形态发布（同 v0.1.3 体例）**：`vision-exp-tile-v0.1.4.zip`（完整版：可选 paddle/rapid venv）与 `vision-exp-tile-v0.1.4-nopython.zip`（**无 Python 零配置版**：本地识别 = 系统自带 Windows OCR 常驻池）。
-> 回滚/调参：`DSH_OCR_POOL=0`（回退旧本地识别）、`DSH_OCR_CACHE=0`（关缓存）等详见各小节。
-> **中文 OCR 语言包指引（nopython 版）**：Windows 设置 → 语言与区域 → 添加「中文(简体)」语言包（含 OCR 可选功能，或 `dism /online /add-capability /capabilityname:Language.OCR~~~zh-CN~0.0.1.0`）；未安装时 Windows OCR 只识别英文/乱码，本插件会自动降级为视觉 API 转录（不报错）。
+> **本次更新（v0.2.0）完全由 DeepSeek Harness 自主完成**，内容：
+> ① **OCR 前处理管线**（`preprocess.js`，纯本地零新依赖）：深底白字图**自动反色**、低对比图 **Otsu 二值化**、手写/小字 **≤2× 放大**、百分位对比度拉伸；纯色/高对比印刷体自动跳过（零副作用）；`DSH_OCR_PREPROC=0` 关闭；
+> ② **手写判别分流增强**：预处理 + Paddle 高精度模型（`DSH_OCR_MODEL=server`，PP-OCRv4_server_rec，下载失败自动回退）+ **手写/低置信/深底失败区域自动升级视觉 API 转录**（`DSH_OCR_UPGRADE=full|low|off`）；
+> ③ **可行性验证通过**：深底图 0→4 行；手写页行数 ×1.23；印刷体漏检 0/10；判别器 15 样本（5 手写+10 印刷）校准 **100% 分离**（阈值 0.55）；单测 **73/73**；`preprocess`/`upgrade` 新参数向后兼容；
+> ④ 实测：手写页视觉 API ≈¥0.01-0.05/页；本地前处理单区域 +50-200ms；
+> ⑤ **手写判别分流**：每个文字区先判别是否手写——**预检视觉标记**（模型预检时输出 `isHandwrite`）+ **本地启发式判别器**（`src/handwrite.js`，笔画连通域密度/行投影起伏/笔画占比）**smart 互验**（分歧时视觉优先）；**手写区域**直接视觉 API 转录（逐行，看不清用（？）标注）；**非手写区域**高效本地 OCR 且**不放大**（省 ~60% 耗时）；`DSH_OCR_HANDWRITE=smart|visual|local|off`；
+> 双形态发布不变：`vision-exp-tile-v0.2.0.zip`（完整版）+ `vision-exp-tile-v0.2.0-nopython.zip`（零配置版）。
 
 # vision-exp-tile ◆ 为 deepseek-v4-flash-vision-exp 定制的大图智能识图插件
 

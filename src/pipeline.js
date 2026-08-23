@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { cropRegion, normalizeRect } from './tile-engine.js';
 import { ocrText } from './ocr-local.js';
+import { detectHandwrite } from './handwrite.js';
 import { previewImage, recognizeRegion } from './vision-client.js';
 import { buildPixelGrid } from './pixelgrid.js';
 
@@ -83,12 +84,16 @@ export async function runPipeline(opts) {
     question = '', rotate = 0, ocrEngine = 'auto',
     ocrOverride, maxEdge = 800, maxTokens = 8192,
     tempDir, signal, fetchImpl, timeoutMs = 300000,
-    interestConcurrency
+    interestConcurrency, upgrade = 'default', preprocess = 'auto'
   } = opts;
   // OCR 函数可注入（单元测试用）；默认走本地 ocrText（paddle→rapid→windows 降级链）
   const ocrFn = typeof ocrOverride === 'function' ? ocrOverride : ocrText;
   // 兴趣点 API 并发度（参数 > 环境 > 默认 2）；文字区并发沿用 DSH_PIPELINE_CONCURRENCY
   const interestLimit = interestConcurrencyOf(interestConcurrency);
+  // 升级模式优先级：参数(显式) > DSH_OCR_UPGRADE > 默认 full
+  const upgradeModeRaw = upgrade !== 'default' ? upgrade : String(process.env.DSH_OCR_UPGRADE ?? 'full').trim();
+  const upgradeMode = ['full', 'low', 'off'].includes(upgradeModeRaw) ? upgradeModeRaw : 'full';
+  const preprocessMode = preprocess === 'off' ? 'off' : 'auto';
 
   const stages = [];
   // 原图媒体类型（官方视觉 API 支持 PNG/JPEG/WebP/GIF，按扩展名推断）
@@ -148,42 +153,80 @@ export async function runPipeline(opts) {
       const regionPath = join(outputDir, `text-region-${i}-${region.x0}_${region.y0}_${region.x1}_${region.y1}.png`);
       await writeFile(regionPath, cropped.buffer);
       stages.push({ kind: 'text-crop', index: i, path: regionPath });
-      // 本地 OCR（自动降级链；测试可注入 ocrOverride）。
-      // 兜底：任何 OCR 环境都不可用时（如非 Windows 且未装 paddle/rapid），
-      // 降级为视觉 API 直接转录该文字区域——保证 pipeline 跨平台不中断。
-      let ocrResult;
-      try {
-        ocrResult = await ocrFn(cropped.buffer, { engine: ocrEngine, timeoutMs: 120000 });
-      } catch (error) {
+
+      /* —— v0.2.0 分类分流：手写判别（视觉预检标记 + 本地判别器 智能切换/互验）——
+       *   DSH_OCR_HANDWRITE=smart(默认)|visual|local|off
+       *   - visual   ：只用预检 isHandwrite 标记（模型看图判断，精度高）
+       *   - local    ：只用本地判别器 detectHandwrite（零 API，校准后本样本集 100% 分离）
+       *   - smart    ：标记存在→取视觉；缺失→本地；两者都有且分歧→视觉优先（note 标注冲突）
+       *   手写区域 → 直接视觉 API 转录（跳过本地 OCR：更快更准）
+       *   非手写   → 高效本地 OCR（preprocess 仅保留反色/otsu/contrast，**不放大**→省 60% 耗时；
+       *               低对比区仍自动增强）*/
+      const hwMode = String(process.env.DSH_OCR_HANDWRITE ?? 'smart').trim();
+      let isHandwrite = null; // 暂无结论
+      let hwSource = null;
+      let hwConflict = false;
+      const visualHw = typeof region.isHandwrite === 'boolean' ? region.isHandwrite : null;
+      let localHw = null;
+      if (hwMode !== 'off' && (hwMode === 'local' || hwMode === 'smart') && typeof detectHandwrite === 'function') {
         try {
-          const fallback = await recognizeRegion({
+          localHw = detectHandwrite(cropped.buffer).isHandwrite;
+        } catch {
+          localHw = null;
+        }
+      }
+      if (hwMode === 'visual') isHandwrite = visualHw ?? localHw ?? false;
+      else if (hwMode === 'local') isHandwrite = localHw ?? visualHw ?? false;
+      else { // smart
+        if (visualHw !== null && localHw === null) { isHandwrite = visualHw; hwSource = 'visual'; }
+        else if (visualHw === null && localHw !== null) { isHandwrite = localHw; hwSource = 'local-fallback'; }
+        else if (visualHw !== null && localHw !== null) {
+          if (visualHw === localHw) { isHandwrite = visualHw; hwSource = 'visual+local'; }
+          else { isHandwrite = visualHw; hwSource = 'visual-conflict'; hwConflict = true; } // 视觉优先，标注冲突
+        } else { isHandwrite = false; hwSource = 'none'; }
+      }
+
+      let ocrResult;
+      // —— 分支 A：手写区 → 直接视觉 API 转录 ——
+      if (isHandwrite && apiKey && hwMode !== 'off') {
+        try {
+          const hwRes = await recognizeRegion({
             apiKey, baseURL, model,
             buffer: cropped.buffer,
             mediaType: cropped.mediaType,
-            label: `文字区域 ${i}`,
-            question: '该区域内容为文字：请完整、准确地转录全部文字内容。',
+            label: `手写文字区域 ${i}`,
+            question: '该区域为手写文字：请逐行完整转录（保持原意；看不清用（？）标注；缩写/潦草按上下文推断）。',
             maxTokens,
             signal, fetchImpl, timeoutMs
           });
           ocrResult = {
-            engine: 'vision-fallback',
-            text: fallback.description,
+            engine: 'handwrite-api',
+            text: hwRes.description,
             lines: [],
-            degraded: true,
-            reason: error.message
+            degraded: false,
+            isHandwrite: true,
+            hwSource,
+            hwConflict,
+            reason: '手写分流：视觉 API 转录'
           };
-        } catch (fallbackError) {
-          ocrResult = { engine: 'unavailable', text: '', lines: [], degraded: true, reason: `${error.message}；${fallbackError.message}` };
-        }
-      }
-      // —— 置信度自适应升级：OCR 平均置信度偏低（<0.85）且视觉 API 可用 →
-      //    该文字区自动升级为视觉 API 转录（rapid 快但偶有错字；高价值区保精度）——
-      if (!ocrResult.degraded && Array.isArray(ocrResult.lines) && ocrResult.lines.length > 0 && apiKey) {
-        const scores = ocrResult.lines.map((l) => Number(l.score)).filter((s) => Number.isFinite(s));
-        const avgScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 1;
-        if (avgScore < 0.85) {
+        } catch (hwErr) {
+          // 手写 API 失败 → 回退本地 OCR（降级不中断）
           try {
-            const up = await recognizeRegion({
+            ocrResult = await ocrFn(cropped.buffer, { engine: ocrEngine, timeoutMs: 120000, preprocess: preprocessMode });
+            ocrResult = { ...ocrResult, degraded: true, note: `手写 API 失败回退本地：${String(hwErr.message || hwErr).slice(0, 120)}` };
+          } catch {
+            ocrResult = { engine: 'unavailable', text: '', lines: [], degraded: true, reason: String(hwErr.message || hwErr).slice(0, 160) };
+          }
+        }
+      } else {
+        // —— 分支 B：非手写/无判别 → 高效本地 OCR（normal 区 preprocess 关闭放大）——
+        const preModeNormal = preprocessMode === 'off' ? 'off' : 'auto-enlarge-off';
+        try {
+          ocrResult = await ocrFn(cropped.buffer, { engine: ocrEngine, timeoutMs: 120000, preprocess: preModeNormal });
+          if (isHandwrite === false) ocrResult = { ...ocrResult, isHandwrite: false, hwSource };
+        } catch (error) {
+          try {
+            const fallback = await recognizeRegion({
               apiKey, baseURL, model,
               buffer: cropped.buffer,
               mediaType: cropped.mediaType,
@@ -193,15 +236,59 @@ export async function runPipeline(opts) {
               signal, fetchImpl, timeoutMs
             });
             ocrResult = {
-              engine: 'auto-upgrade', // 标注：低置信度自动升级为视觉转录
-              text: up.description,
+              engine: 'vision-fallback',
+              text: fallback.description,
               lines: [],
               degraded: true,
-              reason: `OCR 平均置信度 ${avgScore.toFixed(2)} < 0.85，自动升级视觉转录`
+              reason: error.message
             };
-          } catch (upgradeErr) {
-            ocrResult.note = `升级失败（保留 OCR 结果）：${String(upgradeErr.message || upgradeErr).slice(0, 120)}`;
+          } catch (fallbackError) {
+            ocrResult = { engine: 'unavailable', text: '', lines: [], degraded: true, reason: `${error.message}；${fallbackError.message}` };
           }
+        }
+      }
+      // —— 三合一升级触发（v0.2.0）：低置信 ∪ 手写候选 ∪ 深底处理失败 → 视觉 API 转录 ——
+      //   upgradeMode：full（默认）=全部触发；low=仅低置信（旧行为）；off=不升级。
+      const needUpgrade = (() => {
+        if (upgradeMode === 'off') return false;
+        if (ocrResult.degraded || !apiKey) return false;
+        if (ocrResult.engine === 'handwrite-api') return false; // 手写已 API
+        if (!Array.isArray(ocrResult.lines)) return false;
+        const scores = ocrResult.lines.map((l) => Number(l.score)).filter((s) => Number.isFinite(s));
+        const avgScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 1;
+        const pre = Array.isArray(ocrResult.preprocess) ? ocrResult.preprocess : [];
+        const handwritingSign = pre.includes('otsu-under-dark');          // 深底处理
+        const darkFail = Boolean(ocrResult.isDark) && ocrResult.lines.length === 0; // 深底处理失败
+        // 手写判别信号下阈值放宽（rapid 手写平均分常在 0.82-0.92 抖动），印刷体不误伤
+        const thresh = isHandwrite === true ? 0.9 : 0.85;
+        if (upgradeMode === 'low') return !isHandwrite && !darkFail && avgScore < 0.85;
+        return avgScore < thresh || darkFail;
+      })();
+      if (needUpgrade) {
+        // 触发条件说明（进 reason，供用户/模型判断）
+        const pre = Array.isArray(ocrResult.preprocess) ? ocrResult.preprocess : [];
+        const scores = ocrResult.lines.map((l) => Number(l.score)).filter((s) => Number.isFinite(s));
+        const avgScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 1;
+        const why = [avgScore < 0.85 ? `置信度 ${avgScore.toFixed(2)}<0.85` : '', pre.includes('enlarge') && (avgScore < 0.9) ? '手写/小字候选' : '', ocrResult.isDark && ocrResult.lines.length === 0 ? '深底处理失败' : ''].filter(Boolean).join('+');
+        try {
+          const up = await recognizeRegion({
+            apiKey, baseURL, model,
+            buffer: cropped.buffer,
+            mediaType: cropped.mediaType,
+            label: `文字区域 ${i}`,
+            question: '该区域内容为文字：请完整、准确地转录全部文字内容（若为手写体请逐行转录）。',
+            maxTokens,
+            signal, fetchImpl, timeoutMs
+          });
+          ocrResult = {
+            engine: 'auto-upgrade', // 标注：自动升级为视觉转录
+            text: up.description,
+            lines: [],
+            degraded: true,
+            reason: `升级触发：${why || '低置信'}`
+          };
+        } catch (upgradeErr) {
+          ocrResult.note = `升级失败（保留 OCR 结果）：${String(upgradeErr.message || upgradeErr).slice(0, 120)}`;
         }
       }
       // 简化像素网格（版式辅助）

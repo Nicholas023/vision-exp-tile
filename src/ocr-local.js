@@ -22,6 +22,7 @@ import { join, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { getOcrPool } from './ocr-pool.js';
+import { autoPreprocess } from './preprocess.js';
 
 /** 插件 src 目录（用于定位 worker 脚本） */
 const __dirnameLocal = dirname(fileURLToPath(import.meta.url));
@@ -370,16 +371,37 @@ function runRapidOcr(pngPath, timeoutMs = 90_000) {
  * @param {object} opts - {engine('paddle'|'rapid'|'windows'|'auto'), timeoutMs}
  * @returns {Promise<{engine:string, text:string, lines:Array}>}
  */
-export async function ocrText(pngBuffer, { engine = 'auto', timeoutMs } = {}) {
+export async function ocrText(pngBuffer, { engine = 'auto', timeoutMs, preprocess = 'auto' } = {}) {
   // —— 本地 OCR 结果缓存：同图重复识别直接命中（默认 48h；DSH_OCR_CACHE=0 禁用）——
   const cacheKey = ocrCacheKey(pngBuffer);
   const cached = await ocrCacheGet(cacheKey);
   if (cached) return { ...cached, cached: true };
 
+  // —— v0.2.0 前处理：深底白字/低对比自动反色二值化、手写/小字放大（DSH_OCR_PREPROC=0 关闭）
+  //    preprocess='auto-enlarge-off'（分流：非手写区）→ 只增强不放大（省 60% 耗时）
+  let preApplied = [];
+  let isDark = false;
+  let workBuffer = pngBuffer;
+  if (preprocess !== 'off' && String(process.env.DSH_OCR_PREPROC ?? '1') !== '0') {
+    try {
+      const enlarge = preprocess === 'auto-enlarge-off' ? 'off' : 'auto';
+      const proc = await autoPreprocess(pngBuffer, { enlarge });
+      workBuffer = proc.buffer;
+      preApplied = proc.applied ?? [];
+      isDark = Boolean(proc.isDark);
+      if (preApplied.length > 0) {
+        // 只有真实发生处理时才替换工作字节（applied=[] 时保持原 buffer，避免无谓重编码）
+        workBuffer = proc.buffer;
+      }
+    } catch {
+      /* 前处理失败 → 原图继续 */
+    }
+  }
+
   // 默认走 resolveEngine()（rapid 优先，见 resolveEngine 注释）；显式指定则尊重
   const engineUsed = engine === 'auto' ? await resolveEngine() : engine;
   const tmpPath = join(tmpdir(), `vision-tile-ocr-${randomBytes(6).toString('hex')}.png`);
-  await writeFile(tmpPath, pngBuffer);
+  await writeFile(tmpPath, workBuffer);
   try {
     let result;
     // —— 性能优化：paddle/rapid/windows 均优先走常驻进程池（引擎常驻；多核并行）——
@@ -390,7 +412,10 @@ export async function ocrText(pngBuffer, { engine = 'auto', timeoutMs } = {}) {
         const lines = (resp.lines ?? []).map((l) => ({
           text: l.text, x: l.x, y: l.y, width: l.width, height: l.height, score: l.score
         }));
-        const entry = { engine: engineUsed, text: lines.map((l) => l.text).join('\n'), lines, pooled: true };
+        const entry = {
+          engine: engineUsed, text: lines.map((l) => l.text).join('\n'), lines, pooled: true,
+          preprocess: preApplied, isDark
+        };
         await ocrCacheSet(cacheKey, entry);
         return entry;
       } catch (poolErr) {
@@ -399,7 +424,11 @@ export async function ocrText(pngBuffer, { engine = 'auto', timeoutMs } = {}) {
         else if (engineUsed === 'rapid') result = await runRapidOcr(tmpPath, timeoutMs);
         else result = await runWindowsOcr(tmpPath, timeoutMs);
         const lines = result.lines ?? [];
-        const entry = { engine: engineUsed, text: lines.map((l) => l.text).join('\n'), lines, pooled: false, note: String(poolErr.message || poolErr).slice(0, 200) };
+        const entry = {
+          engine: engineUsed, text: lines.map((l) => l.text).join('\n'), lines, pooled: false,
+          note: String(poolErr.message || poolErr).slice(0, 200),
+          preprocess: preApplied, isDark
+        };
         await ocrCacheSet(cacheKey, entry);
         return entry;
       }
@@ -413,7 +442,9 @@ export async function ocrText(pngBuffer, { engine = 'auto', timeoutMs } = {}) {
     const entry = {
       engine: engineUsed,
       text: lines.map((l) => l.text).join('\n'),
-      lines
+      lines,
+      preprocess: preApplied,
+      isDark
     };
     await ocrCacheSet(cacheKey, entry);
     return entry;

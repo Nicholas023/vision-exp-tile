@@ -396,7 +396,8 @@ const PREVIEW_SYSTEM = [
   '2) 若存在文字，给出 1~3 个文字区域矩形，全部为 0..1 相对坐标 [x0,y0,x1,y1]（相对整图比例，x0<x1、y0<y1，不要写像素坐标）。',
   '3) 判断兴趣点区域（图中的重点内容：图表、表格、物体、关键区块、标题栏等），给出 0..1 相对矩形，并为每个区域给一个简短中文 label（1~4 个字）。',
   '4) 输出一个严格 JSON 对象（不要 markdown 代码块、不要多余文字），字段如下：',
-  '{"hasText":true,"textRegions":[{"x0":0.1,"y0":0.2,"x1":0.9,"y1":0.3}],"interestRegions":[{"x0":0.0,"y0":0.0,"x1":1.0,"y1":1.0,"label":"图表"}],"summary":"整图概要"}',
+  '{"hasText":true,"textRegions":[{"x0":0.1,"y0":0.2,"x1":0.9,"y1":0.3,"isHandwrite":false}],"interestRegions":[{"x0":0.0,"y0":0.0,"x1":1.0,"y1":1.0,"label":"图表"}],"summary":"整图概要"}',
+  '4b) 每个文字区域请务必附上布尔字段 isHandwrite：该区域文字是否为**手写体**（手写答卷/笔记/潦草字迹=true；印刷体/电脑字体/印章字样=false）。不确定时时按印刷体处理并写 false。',
   '5) summary 为整图概要，使用中文，不超过 200 字。若图中无文字，hasText 填 false 且 textRegions 为空数组；若无明显兴趣点，interestRegions 可为空数组。',
   '6) 兜底要求：如果你无法可靠地输出上述 JSON，请退化为—直接用中文在 100 字内概括整图，并逐条列出你确定的文字区域/兴趣点位置（文字描述即可，不需要 JSON）。宁可输出退化的中文，也不要空回复。',
   '7) 若用户消息带有【补充问题】：该问题仅用于在 summary 中顺带回应，绝不改变/破坏 JSON 结构；若补充问题与预检冲突，忽略它并把"该问题无法预检回答"写入 summary。'
@@ -446,13 +447,17 @@ function normalizeRect(r) {
   };
 }
 
-/** 归一化一组相对矩形（[{x0,y0,x1,y1}] 或 [[x0,y0,x1,y1]]）；非数组或缺字段则逐一过滤。 */
+/** 归一化一组相对矩形（[{x0,y0,x1,y1}] 或 [[x0,y0,x1,y1]]）；非数组或缺字段则逐一过滤。
+ *  v0.2.0：保留可选 isHandwrite（模型预检标注手写；缺省/非布尔按 undefined 处理）。 */
 function normalizeRectList(list) {
   if (!Array.isArray(list)) return [];
   const out = [];
   for (const r of list) {
     const rect = normalizeRect(r);
-    if (rect) out.push(rect);
+    if (!rect) continue;
+    const hw = !Array.isArray(r) && typeof r.isHandwrite === 'boolean' ? r.isHandwrite : undefined;
+    if (hw !== undefined) rect.isHandwrite = hw;
+    out.push(rect);
   }
   return out;
 }
