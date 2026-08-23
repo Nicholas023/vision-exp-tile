@@ -16,7 +16,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org)
-[![version](https://img.shields.io/badge/vision--exp--tile-v0.1.0-orange.svg)](#)
+[![version](https://img.shields.io/badge/vision--exp--tile-v0.1.4-orange.svg)](#)
 [![DSH](https://img.shields.io/badge/DeepSeek%20Harness-plugin-purple.svg)](#)
 
 > 独立 DSH 插件：**零依赖任何第三方 DSH 插件**（picturereader 等均未使用，仅用纯官方 DSH 服务 + 可选开源 OCR 环境）。把大图切成 **800×800 无损小块**（官方缩放规则的"甜蜜点"：块在模型侧**不被降采样**、每块**≤384 token**），携带**坐标标注 + 分块聚合逻辑**直接调用 DeepSeek 视觉 API 完成识别与聚合，返回结构化答案（**不统计 token、不计算费用**）。

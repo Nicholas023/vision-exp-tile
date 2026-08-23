@@ -54,8 +54,9 @@ jobs:
           echo "已生成："
           ls -lh dist/
 
-      - name: 创建 GitHub Release 并附资产
+      - name: 创建 GitHub Release 并附资产（changelog 栏 = 仓库 CHANGELOG.md，中文、只含最新一期）
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          # 注意：changelog 栏用 CHANGELOG.md（中文写本次更新内容；发版前请更新该文件为最新一期）
+          body_path: CHANGELOG.md
           files: dist/vision-exp-tile-v*.zip
