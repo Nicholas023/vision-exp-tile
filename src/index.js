@@ -1000,10 +1000,15 @@ export function apply(ctx, configRaw) {
       sourceGetter = () => normalizeFromSettings(scope.get());
       // 首次应用一次设置页的环境变量映射（OCR 引擎/池等）。
       applySettingsEnv(scope.get());
-      // v0.4.1：异步设备探测完成后，按 auto 档位重新应用 env（若为 slow 会写入
-      //   放宽超时/降并发/关 GPU 的推荐值），并回写只读设备画像（device_profile）。
-      //   注意：探测含 GPU spawn（≤1.5s），故 fire-and-forget，不阻塞插件启动。
-      probeDevice().then((probe) => {
+      // v0.4.1 扩展：异步设备探测完成后，按 auto 档位重新应用 env（slow/省电/平台降级/
+      //   慢网等推荐统一合并后落地），并回写只读设备画像（device_profile）。
+      //   探测含 GPU spawn/电源/微基准（≤1.5s，并行），故 fire-and-forget，不阻塞插件启动；
+      //   device_benchmark / device_power_probe 设置开关控制是否跑对应探测。
+      const probeOpts = {
+        runBenchmark: scope.get().device_benchmark !== false,
+        runPowerProbe: scope.get().device_power_probe !== false
+      };
+      probeDevice(null, probeOpts).then((probe) => {
         try {
           applySettingsEnv(scope.get());
           const text = deviceProfileText(probe);

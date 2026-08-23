@@ -101,7 +101,7 @@ test('enum 字段均声明 mapOptions，且显示值/真实值等长、真实值
   const src = readFileSync(clientPath, 'utf8');
   const fields = parseEnumFields(src);
   // 覆盖规格列出的全部 enum 字段
-  const expectedKeys = ['ocr_engine', 'preprocess', 'handwrite_route', 'upgrade', 'format', 'mode', 'rotate', 'gpu_provider', 'performance_tier'];
+  const expectedKeys = ['ocr_engine', 'preprocess', 'handwrite_route', 'upgrade', 'format', 'mode', 'rotate', 'gpu_provider', 'performance_tier', 'platform_fallback'];
   assert.deepEqual(fields.map((f) => f.key), expectedKeys);
   for (const f of fields) {
     assert.equal(f.display.length, f.real.length, `字段 ${f.key} 的 options 与 mapOptions 应等长`);

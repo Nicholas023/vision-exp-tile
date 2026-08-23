@@ -26,12 +26,19 @@
  * performance_tier=auto 时按设备档位（device.js 的缓存探测）对「未显式设置」的
  * OCR 池超时/池大小/GPU 关停应用推荐值；用户显式值 > tier 推荐 > 默认。
  *
+ * v0.4.1 扩展：低性能设备适配增强（A 微基准 / B 电池 / C 平台降级 / D 慢网）。
+ * computeRecFor(v) 汇总「单一生效推荐」——档位推荐 + 平台降级(C) + 省电(B) + 慢网(D)
+ * 依序合并；envFromSettings 消费其 env 相关字段（ocrPool/ocrPoolTimeoutMs/gpuProvider/
+ * testTimeoutFactor/interestConcurrency），normalizeFromSettings 消费其配置级字段
+ * （format / timeoutMs）。开关（device_benchmark/device_power_probe/platform_fallback/
+ * slow_net_adapt）均来自设置快照。
+ *
  * @module vision-exp-tile/runtime
  */
 
-import { normalizeConfig } from './config.js';
+import { normalizeConfig, DEFAULT_CONFIG } from './config.js';
 import { SETTINGS_FIELDS } from './settings-schema.js';
-import { getCachedProbe, classifyTier, applyTierRecommendations, DEFAULT_RECOMMENDATIONS } from './device.js';
+import { getCachedProbe, classifyTier, computeRecommendations, DEFAULT_RECOMMENDATIONS } from './device.js';
 
 /* ------------------------------------------------------------------ */
 /* 内部状态                                                             */
@@ -157,6 +164,33 @@ function effectiveTier(raw) {
 }
 
 /**
+ * 计算「单一生效推荐」：档位推荐 + 平台降级(C) + 省电(B) + 慢网(D) 依序合并。
+ *
+ * 依据设备缓存探测结果（benchScore / onBattery / platformInfo）与设置快照里的
+ * 开关（device_benchmark 仅影响探测，故此处用 device_power_probe / platform_fallback /
+ * slow_net_adapt），返回合并后的推荐对象（详见 device.js computeRecommendations）。
+ * 各开关为 false 时不应用对应推荐；用户显式值仍由调用方以「显式 > 推荐 > 默认」落地。
+ *
+ * @param {object} [raw] - 设置快照（snake_case）。
+ * @returns {object} 合并后的推荐对象（含 ocrPoolTimeoutMs/ocrPool/gpuProvider/
+ *   testTimeoutFactor/format/interestConcurrency/timeoutMs）。
+ */
+function computeRecFor(v) {
+  const tier = effectiveTier(v);
+  const probe = getCachedProbe();
+  return computeRecommendations({
+    tier,
+    onBattery: probe ? (probe.onBattery === true) : false,
+    platformInfo: probe ? (probe.platformInfo ?? null) : null,
+    opts: {
+      usePower: v.device_power_probe !== false,
+      pfMode: String(v.platform_fallback ?? 'auto'),
+      useNet: v.slow_net_adapt !== false
+    }
+  });
+}
+
+/**
  * 把设置快照映射成「应写入 process.env 的 DSH_* 键值对」。
  *
  * 仅映射那些在设置页中有明确含义、且能直接落 env 的键：
@@ -164,8 +198,9 @@ function effectiveTier(raw) {
  *  - 数值：交叠出界/非整数则忽略（模块自行回退）。
  *  - 布尔：true=不设置（模块默认开）；false=显式 "0" 关闭。
  *
- * v0.4.1：performance_tier=auto 时按设备档位对「未显式设置」的 OCR 池超时/池大小/
- * GPU 关停应用 slow 推荐（用户显式值 > tier 推荐 > 默认）。
+ * v0.4.1 扩展：performance_tier=auto 时按设备档位对「未显式设置」的 OCR 池超时/池大小/
+ * GPU 关停/测试倍率/兴趣点并发应用推荐（用户显式值 > tier 推荐 > 默认）；新增
+ * 平台降级(C)/省电(B)/慢网(D) 推荐也在此统一合并后按 env 字段落地。
  *
  * @param {object} [raw] - 设置快照（snake_case，scope.get() 的解析值）。
  * @returns {Record<string,string>} env 键值对（不写入 process.env，纯计算）。
@@ -174,13 +209,12 @@ export function envFromSettings(raw) {
   const v = raw && typeof raw === 'object' ? raw : {};
   const out = {};
 
-  // v0.4.1：解析性能档位与推荐覆盖。
+  // v0.4.1 + 扩展：计算「单一生效推荐」——档位推荐 + 平台降级(C) + 省电(B) + 慢网(D)。
   //   - 用户显式 performance_tier（fast/normal/slow）→ 直接用该档位；
   //   - auto（默认）→ 用 device.js 的缓存探测结果判定；尚无缓存（探测未跑）时
   //     保守按 normal（不臆测慢机，避免探测失败被误判）。
-  // 用户显式值 > tier 推荐 > 默认（见下述各字段的写入顺序）。
-  const tier = effectiveTier(v);
-  const rec = applyTierRecommendations(tier);
+  // 用户显式值 > 档位推荐 > 默认（见下述各字段的写入顺序）。开关来自设置快照。
+  const rec = computeRecFor(v);
 
   // DSH_OCR_ENGINE：auto/空=不设置（模块自动降级）。
   const engine = String(v.ocr_engine ?? 'auto').trim();
@@ -194,9 +228,13 @@ export function envFromSettings(raw) {
   const up = String(v.upgrade ?? 'full').trim();
   if (up !== '') out.DSH_OCR_UPGRADE = up;
 
-  // DSH_INTEREST_CONCURRENCY（1..4）。
+  // DSH_INTEREST_CONCURRENCY（1..4）：显式值 > slow 档慢网推荐（降为 1，更稳省并发）> 不设置（默认 2）。
   const ic = Number(v.interest_concurrency);
-  if (Number.isInteger(ic) && ic >= 1 && ic <= 4) out.DSH_INTEREST_CONCURRENCY = String(ic);
+  if (Number.isInteger(ic) && ic >= 1 && ic <= 4) {
+    out.DSH_INTEREST_CONCURRENCY = String(ic);
+  } else if (rec.interestConcurrency !== undefined && rec.interestConcurrency !== DEFAULT_RECOMMENDATIONS.interestConcurrency) {
+    out.DSH_INTEREST_CONCURRENCY = String(rec.interestConcurrency);
+  }
 
   // DSH_OCR_POOL（0..8）：ocr_pool_pool 显式值 > slow 档推荐（降为 2，更省资源防盗崩）> 不设置（默认 4）。
   const pool = Number(v.ocr_pool);
@@ -315,6 +353,13 @@ export function normalizeFromSettings(raw) {
 
   // 2. 交给 normalizeConfig 统一校验归一化（纯函数）。
   const cfg = normalizeConfig(candidate);
+
+  // v0.4.1 扩展：平台降级(C)/慢网(D) 推荐应用到「配置级」字段（format / timeoutMs）。
+  // 仅当用户未显式设置时才生效（用户显式 > 推荐 > 默认）；用「值等于默认」近似判定未显式设置
+  // （format 默认 png、timeoutMs 默认 300000），避免把用户显式改的值覆盖掉。
+  const recCfg = computeRecFor(v);
+  if (recCfg.format !== undefined && cfg.format === DEFAULT_CONFIG.format) cfg.format = recCfg.format;
+  if (recCfg.timeoutMs !== undefined && cfg.timeoutMs === DEFAULT_CONFIG.timeoutMs) cfg.timeoutMs = recCfg.timeoutMs;
 
   // 3. 追加纯设置项（不经 normalizeConfig；为工具读取/调试用）。
   return {

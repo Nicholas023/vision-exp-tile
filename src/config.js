@@ -63,7 +63,12 @@ export const DEFAULT_CONFIG = Object.freeze({
   ocrPoolTimeoutMs: 120000,
   performanceTier: 'auto',
   testTimeoutFactor: 1,
-  testSkipTiming: false
+  testSkipTiming: false,
+  // v0.4.1 扩展：低性能设备适配增强（每项可控开关）
+  deviceBenchmark: true,
+  devicePowerProbe: true,
+  platformFallback: 'auto',
+  slowNetAdapt: true
 });
 
 /* ------------------------------------------------------------------ */
@@ -206,6 +211,12 @@ export function normalizeConfig(raw) {
   const testTimeoutFactor = readInt(src.testTimeoutFactor, DEFAULT_CONFIG.testTimeoutFactor, 1, 8, 'testTimeoutFactor');
   const testSkipTiming = boolVal(src.testSkipTiming, DEFAULT_CONFIG.testSkipTiming);
 
+  // 9. v0.4.1 扩展：低性能设备适配增强（每项可控开关）。
+  const deviceBenchmark = boolVal(src.deviceBenchmark, DEFAULT_CONFIG.deviceBenchmark);
+  const devicePowerProbe = boolVal(src.devicePowerProbe, DEFAULT_CONFIG.devicePowerProbe);
+  const platformFallback = readEnum(src.platformFallback, DEFAULT_CONFIG.platformFallback, ['auto', 'on', 'off'], 'platformFallback');
+  const slowNetAdapt = boolVal(src.slowNetAdapt, DEFAULT_CONFIG.slowNetAdapt);
+
   return {
     apiKeyEnv,
     baseURL,
@@ -226,6 +237,10 @@ export function normalizeConfig(raw) {
     ocrPoolTimeoutMs,
     performanceTier,
     testTimeoutFactor,
-    testSkipTiming
+    testSkipTiming,
+    deviceBenchmark,
+    devicePowerProbe,
+    platformFallback,
+    slowNetAdapt
   };
 }

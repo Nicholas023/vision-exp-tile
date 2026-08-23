@@ -11,6 +11,10 @@
 > ② **设置项增强**：新增 `ocr_pool_timeout_ms`（OCR 池单请求超时，可调）、`performance_tier`（auto/fast/normal/slow，auto=自动探测）、`test_timeout_factor`（测试超时倍率 1..8，推荐 4=slow 档默认，手动最保守 8）、`test_skip_timing`（跳过时序敏感断言）+ 只读设备画像 `device_profile`；用户显式值 > 档位推荐 > 默认；
 > ③ **安装即优化 + 自检入口**：安装脚本 `install-to-web-profile.ps1` 自动识别设备，slow 档自动把调优键写入 settings.yaml 的 `vision-exp-tile` 分区（仅未显式设置的键，幂等 + 备份 + 可 `-NoDeviceTune` 跳过）；新增 `npm run selfcheck`（`node scripts/self-check.mjs`）——测试前先问是否运行（一般推荐运行），按设备档位注入超时/倍率，慢机仍超时可设置页调高 `ocr_pool_timeout_ms` 或开启 `test_skip_timing` 声明跳过时序断言；
 > ④ **其余**：`client.js`/设置页同步 4 新字段 + 只读画像；OCR 池超时统一由 `DSH_OCR_POOL_TIMEOUT` 控制（`gpuPoolTimeoutMs` 与 pipeline 的写死 120s 一并收敛）；新增 `device.test.js`/`suite-env.test.js`（含慢机注入验证）。
+> ⑤ **设备微基准算力评级（A）**：新增纯 JS 轻量基准（约 0.4s，归一化 0..2、1.0=参考机）修正档位——只按核数不准（小核/降频/云主机/VM 配额）；基准 <0.5 不判 fast、<0.3 且无 GPU 判 slow。设置项 `device_benchmark` 可关。
+> ⑥ **电池/低功耗探测（B）**：检测是否电池放电；放电中且档位 fast/normal 自动应用省电推荐（OCR 池并发降到 2、测试倍率×2、不自动开 GPU；slow 推荐不变）。设置项 `device_power_probe` 可关。
+> ⑦ **ARM/WSL/容器降级（C）**：检测 arch/WSL/容器；这些受限环境自动用保守默认（块格式 jpeg、OCR 池并发 2、不自动开 GPU）。设置项 `platform_fallback`=auto/on/off。
+> ⑧ **慢网适配（D）**：slow 档自动把兴趣点并发降到 1、视觉 API 单请求超时放大到 600s（默认 300s×2）。设置项 `slow_net_adapt` 可关。
 
 # vision-exp-tile ◆ 为 deepseek-v4-flash-vision-exp 定制的大图智能识图插件
 
@@ -140,6 +144,10 @@ dsh web
 | `performanceTier` | `auto` | 性能档位：auto=自动探测（默认）/fast/normal/slow（非 auto=用户强制，不应用自动推荐） |
 | `testTimeoutFactor` | `1` | 测试超时判定倍率（1..8；推荐 4=slow 档默认，手动最保守 8；慢机可调大，降低时序抖动失败） |
 | `testSkipTiming` | `false` | 是否跳过时序敏感断言（用户声明跳过测试） |
+| `deviceBenchmark` | `true` | 设备微基准算力评级（A）；false=跳过基准，档位只按 CPU/内存/GPU |
+| `devicePowerProbe` | `true` | 电池/低功耗探测（B）；false=不探测（不应用省电推荐） |
+| `platformFallback` | `auto` | ARM/WSL/容器平台降级（C）：auto=按环境自动降级 / on=强制降级 / off=关闭 |
+| `slowNetAdapt` | `true` | 慢网适配（D）；false=slow 档不降兴趣点并发/不放大 API 超时 |
 
 ## 四、成本参考（仅供了解，插件本身不计算）
 
@@ -213,7 +221,8 @@ dsh web
 - 插件直连官方 API，不受 DSH 内置 deepseek 适配器 text-only 限制；结果以**文本**回流会话；
 - 官方限制：图片仅可在 user 消息（已遵守）；单请求 ≤600 图（本插件默认 ≤240 更保守）；base64 请求体 ≤48MiB（超预算自动提示分批/转 JPEG）；
 - "完美识别"是质量目标：块数越多难度越高，分层聚合显著缓解；跨块被切断的细线级元素仍可能合并出错（建议 `overlap=64`）；
-- 全自动 pipeline 无交互通道：预检"重点不明确"时会在结果中说明，可改用 smart（模型先问你）或 `vision_region_crop` 指定坐标。
+- 全自动 pipeline 无交互通道：预检"重点不明确"时会在结果中说明，可改用 smart（模型先问你）或 `vision_region_crop` 指定坐标；
+- **arm64/WSL/容器环境**建议开启保守预设（默认已 `platform_fallback=auto` 自动降级：块格式 jpeg、OCR 池并发 2、不自动开 GPU）；如确需更强算力可设 `platform_fallback=off` 或显式覆盖。
 
 ### 用户如何安装发布版
 

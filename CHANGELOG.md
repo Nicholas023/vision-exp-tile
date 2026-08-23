@@ -28,15 +28,20 @@
 4. **交互式自检入口**（新增 `scripts/self-check.mjs`，`npm run selfcheck`）：调 `probeDevice`+档位打印设备画像与推荐；交互询问"是否运行全量测试？（Y/T/N）"（仅 TTY；参数 `--yes`/`--skip-timing`/`--no` 无人值守）；以子进程跑 `node --test`（读 package.json 显式列表），注入 `DSH_OCR_POOL_TIMEOUT`/`VISION_TEST_TIMEOUT_FACTOR`/`VISION_TEST_SKIP_TIMING`，汇总退出码并给出慢机改善建议。
 5. **安装即优化**（`scripts/install-to-web-profile.ps1`）：安装/更新流程末尾自动探测设备（调用 `node scripts/probe-device.mjs`，输出 JSON），slow 档把调优键（`ocr_pool_timeout_ms`/`ocr_pool`/`gpu_provider`/`test_timeout_factor`）写入 `~/.dsh/settings.yaml` 的 `vision-exp-tile` 分区——仅未显式设置的键（幂等）、写入前备份到同目录 `.bak-时间戳`、参数 `-NoDeviceTune` 跳过；无论与否都打印设备画像与推荐。找不到分区则提示不创建（不越权改其他文件）。
 6. **超时收敛**：`ocr-local.js` 的 `gpuPoolTimeoutMs` 改读 `DSH_OCR_POOL_TIMEOUT`（并导出 `ocrPoolTimeoutMs`，兼容旧 `DSH_OCR_GPU_POOL_TIMEOUT`）；`pipeline.js` 两处写死 `120000` 改由 `ocrPoolTimeoutMs()` 提供；`index.js` 注册设置后异步设备探测，完成后重应用 env（auto+slow 无感简化）并回写只读画像。
+7. **设备微基准算力评级（A）**：`src/device.js` 新增 `cpuWorkload`/`runCpuBenchmark`（纯 JS 轻量基准，预算 ~0.4s，归一化 0..2、1.0=参考机）；`probe` 增加 `benchScore`/`benchOpsPerSec`；`classifyTier` 用基准修正档位（<0.5 不判 fast、<0.3 且无 GPU 判 slow、基准不可用不影响原规则）。设置项 `device_benchmark`（默认 true）可关。校准依据：本机 16 核 normal 基准约 3e8 ops/s（参考分 ~1.0），弱阈值 0.5/0.3 按经验分档。
+8. **电池/低功耗探测（B）**：新增 `detectPowerState`（win32 CIM 一次性查询 `BatteryStatus` / linux sysfs / mac pmset，1s 超时）；`probe` 增加 `onBattery`；放电中且档位 fast/normal 自动应用省电推荐（池并发 2、测试倍率×2、gpuProvider off；slow 推荐不变），经 `computeRecommendations` 合并。设置项 `device_power_probe`（默认 true）可关。
+9. **ARM/WSL/容器降级（C）**：新增 `detectPlatformInfo`（os.arch + /proc/version 判 WSL + /.dockerenv|cgroup 判容器）与 `isPlatformDegraded`；受限环境自动应用保守默认（块格式 jpeg、池并发 2、gpuProvider off），经 `normalizeFromSettings` 落地 `cfg.format`。设置项 `platform_fallback`（auto/on/off，默认 auto）。
+10. **慢网适配（D）**：slow 档自动把兴趣点并发降到 1（`DSH_INTEREST_CONCURRENCY`）、视觉 API 单请求超时放大到 600s（`normalizeFromSettings` 落地 `cfg.timeoutMs`，默认 300s×2）；仅未显式设置时生效（用户显式 > 推荐 > 默认）。设置项 `slow_net_adapt`（默认 true）可关。
+11. **新设置字段汇总**：`device_benchmark`（bool）、`device_power_probe`（bool）、`platform_fallback`（enum auto/on/off）、`slow_net_adapt`（bool），设置/运行时/设置页双语全链同步；`probe-device.mjs` 输出新增 `onBattery`/`platformInfo`/`benchScore`/`detectMs` 字段，`self-check.mjs` 设备画像行新增 电池/平台/基准 三段。
 
 ### 验证
 
-- `npm test`：**128/128** 全绿（原 111 + 新增 device.test.js 13 项 + suite-env.test.js 4 项 + client-bundle 清单补 performance_tier）；
-- `VISION_TEST_TIMEOUT_FACTOR=2 npm test`：128/128 仍全绿（倍率放宽窗口）；
-- `VISION_TEST_TIMEOUT_FACTOR=8 npm test`：128/128 仍全绿（模拟最保守慢机 ×8，性能较好的本机也无超时误报）；
-- `VISION_TEST_SKIP_TIMING=1 npm test`：127 通过 + 1 跳过（超时/时序敏感用例），0 失败；
-- `node scripts/self-check.mjs --yes`：设备画像（本机 16 核/15.6GB/RTX 3050 Ti → normal）→ 注入 120000/×1 → 128/128 通过；
-- `node scripts/probe-device.mjs`：输出合法 JSON；
+- `npm test`：**147/147** 全绿（原 111 + device.test.js 32 项（本轮从 13 扩展，含档位/推荐/基准/省电/平台/慢网等）+ suite-env.test.js 4 项 + client-bundle 清单补 performance_tier/platform_fallback）；
+- `VISION_TEST_TIMEOUT_FACTOR=2 npm test`：147/147 仍全绿（倍率放宽窗口）；
+- `VISION_TEST_TIMEOUT_FACTOR=8 npm test`：147/147 仍全绿（模拟最保守慢机 ×8，性能较好的本机也无超时误报）；
+- `VISION_TEST_SKIP_TIMING=1 npm test`：146 通过 + 1 跳过（超时/时序敏感用例），0 失败；
+- `node scripts/self-check.mjs --yes`：设备画像（本机 16 核/15.6GB/RTX 3050 Ti → normal，电池 交流 / 平台 x64 / 基准 0.96）→ 注入 120000/×1 → 147/147 通过；
+- `node scripts/probe-device.mjs`：输出合法 JSON（含 onBattery/platformInfo/benchScore/detectMs）；本机 tier=normal、onBattery=false、platformInfo={x64,WSL否,容器否}、benchScore≈0.96，detectMs 总耗时 **440ms（≤2s）**、微基准 402ms、GPU 439ms、电源 416ms、平台 0ms；
 - `install-to-web-profile.ps1` 的 slow 合并逻辑经临时 settings.yaml 验证：首次写入 4 调优键、已有键不覆盖、二次幂等、备份生成。
 
 ## v0.4.0（2026-08-23）

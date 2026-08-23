@@ -153,6 +153,23 @@ export const SettingsSchema = z.object({
     .boolean()
     .default(false)
     .description('高级：跳过时序敏感断言（用户声明跳过测试）。true=跳过；false=正常执行。映射环境变量 VISION_TEST_SKIP_TIMING'),
+  // ── v0.4.1 扩展：低性能设备适配增强（每项都有设置开关）────────────────
+  device_benchmark: z
+    .boolean()
+    .default(true)
+    .description('高级：设备微基准算力评级开关。true=自动跑轻量基准（约 0.4s）修正档位（默认）；false=跳过基准，档位只按 CPU/内存/GPU'),
+  device_power_probe: z
+    .boolean()
+    .default(true)
+    .description('高级：电池/低功耗探测开关。true=探测是否电池放电（默认，放电中自动应用省电推荐）；false=不探测'),
+  platform_fallback: z
+    .string()
+    .default('auto')
+    .description('高级：ARM/WSL/容器平台降级：auto=按环境自动降级（默认）/ on=强制降级 / off=关闭'),
+  slow_net_adapt: z
+    .boolean()
+    .default(true)
+    .description('高级：慢网适配开关。true=slow 档自动降低兴趣点并发并把视觉 API 超时放大到 600s（默认）；false=不应用慢网推荐'),
   device_profile: z
     .string()
     .default('')
@@ -204,6 +221,11 @@ export const SETTINGS_FIELDS = [
   { key: 'performance_tier', type: 'enum', labelKey: 'performanceTier', advanced: true, options: ['auto', 'fast', 'normal', 'slow'], envKey: 'DSH_OCR_PERF_TIER', configKey: 'performanceTier' },
   { key: 'test_timeout_factor', type: 'number', labelKey: 'testTimeoutFactor', advanced: true, configKey: 'testTimeoutFactor', envKey: 'VISION_TEST_TIMEOUT_FACTOR' },
   { key: 'test_skip_timing', type: 'boolean', labelKey: 'testSkipTiming', advanced: true, configKey: 'testSkipTiming', envKey: 'VISION_TEST_SKIP_TIMING' },
+  // v0.4.1 扩展：低性能设备适配增强（每项都有设置开关）
+  { key: 'device_benchmark', type: 'boolean', labelKey: 'deviceBenchmark', advanced: true, configKey: 'deviceBenchmark' },
+  { key: 'device_power_probe', type: 'boolean', labelKey: 'devicePowerProbe', advanced: true, configKey: 'devicePowerProbe' },
+  { key: 'platform_fallback', type: 'enum', labelKey: 'platformFallback', advanced: true, options: ['auto', 'on', 'off'], configKey: 'platformFallback' },
+  { key: 'slow_net_adapt', type: 'boolean', labelKey: 'slowNetAdapt', advanced: true, configKey: 'slowNetAdapt' },
   { key: 'device_profile', type: 'text', labelKey: 'deviceProfile', advanced: true, readonly: true },
   { key: 'debug', type: 'boolean', labelKey: 'debug', advanced: true },
 ];

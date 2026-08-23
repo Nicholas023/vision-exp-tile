@@ -118,6 +118,10 @@ window.__ModuleLoader__.load({
       performanceTier: "性能档位",
       testTimeoutFactor: "测试超时倍率",
       testSkipTiming: "跳过时序敏感断言",
+      deviceBenchmark: "设备微基准评级",
+      devicePowerProbe: "电池/低功耗探测",
+      platformFallback: "平台降级（ARM/WSL/容器）",
+      slowNetAdapt: "慢网适配",
       deviceProfile: "设备画像（只读）",
       deviceProfileEmpty: "（待运行时探测完成后自动填充）",
       preprocessAuto: "auto（深底自动反色/低对比二值化/手写放大，默认）",
@@ -143,6 +147,9 @@ window.__ModuleLoader__.load({
       performanceTierFast: "fast（健壮机型）",
       performanceTierNormal: "normal（常规机型）",
       performanceTierSlow: "slow（较差机型，自动放宽超时/降并发/关GPU）",
+      platformFallbackAuto: "auto（按环境自动降级，默认）",
+      platformFallbackOn: "on（强制降级）",
+      platformFallbackOff: "off（关闭降级）",
     };
     var en = {
       nav: "Image Recognition",
@@ -198,6 +205,10 @@ window.__ModuleLoader__.load({
       performanceTier: "Performance tier",
       testTimeoutFactor: "Test timeout factor",
       testSkipTiming: "Skip timing-sensitive asserts",
+      deviceBenchmark: "Device micro-benchmark",
+      devicePowerProbe: "Battery/power probe",
+      platformFallback: "Platform fallback (ARM/WSL/container)",
+      slowNetAdapt: "Slow-network adaptation",
       deviceProfile: "Device profile (read-only)",
       deviceProfileEmpty: "(auto-filled after runtime device probe)",
       preprocessAuto: "auto (dark-invert/binarize/handwrite enlarge; default)",
@@ -223,6 +234,9 @@ window.__ModuleLoader__.load({
       performanceTierFast: "fast (beefy machine)",
       performanceTierNormal: "normal (regular machine)",
       performanceTierSlow: "slow (weak machine; auto-relax timeout/lower concurrency/off GPU)",
+      platformFallbackAuto: "auto (degrade per env; default)",
+      platformFallbackOn: "on (force degrade)",
+      platformFallbackOff: "off (disable)",
     };
 
     // ── field spec（与 src/settings-schema.js 的 SETTINGS_FIELDS 一一对应）────
@@ -268,6 +282,11 @@ window.__ModuleLoader__.load({
       { key: "performance_tier", type: "enum", labelKey: "performanceTier", advanced: true, options: OPT(["Auto", "Fast", "Normal", "Slow"], "performanceTier"), mapOptions: ["auto", "fast", "normal", "slow"] },
       { key: "test_timeout_factor", type: "number", labelKey: "testTimeoutFactor", advanced: true },
       { key: "test_skip_timing", type: "boolean", labelKey: "testSkipTiming", advanced: true },
+      // v0.4.1 扩展：低性能设备适配增强（每项都有设置开关）
+      { key: "device_benchmark", type: "boolean", labelKey: "deviceBenchmark", advanced: true },
+      { key: "device_power_probe", type: "boolean", labelKey: "devicePowerProbe", advanced: true },
+      { key: "platform_fallback", type: "enum", labelKey: "platformFallback", advanced: true, options: OPT(["Auto", "On", "Off"], "platformFallback"), mapOptions: ["auto", "on", "off"] },
+      { key: "slow_net_adapt", type: "boolean", labelKey: "slowNetAdapt", advanced: true },
       { key: "device_profile", type: "text", labelKey: "deviceProfile", advanced: true, readonly: true },
       { key: "debug", type: "boolean", labelKey: "debug", advanced: true },
     ];
