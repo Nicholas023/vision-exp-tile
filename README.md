@@ -6,12 +6,10 @@
 
 各位随意取用：有问题可以提交 **Issue**（如果能自己改的话就更好了——你提交了 Issue，我也只能给 DeepSeek 看然后让他自己改；我本人尝试过多次，均未学会任何写代码的能力，也是乘上 **AI** 的东风，让我有了开发插件的能力）。
 
-> **本次更新（v0.3.0）完全由 DeepSeek Harness 自主完成**，内容：
-> ① **DSH Web 设置页新增「图像识别」分区**：可编辑插件全部配置——识别入口（OCR 引擎/前处理/手写路由/自动升级）、视觉 API 端点（Base URL/模型/API key 环境变量）、切图参数（块边长/切分阈值/交叠/组大小/Tokens/超时/格式/质量/模式/JSON/overview/输出目录/旋转）、并行与缓存（兴趣点并发/OCR 池/缓存/前处理开关）、调试日志；
-> ② **设置以 DSH settings.yaml 持久化、运行时热生效**：保存后立即生效，无需重启；进程池参数（OCR 引擎/池大小）在下次工具调用时生效；工具调用显式参数仍 > 设置页 > 默认值；
-> ③ **设置分区经 dsh 的 settings.describe() 自动暴露**（rc.7+ 已取消硬编码白名单、改为枚举注册的命名空间）：宿主侧 `register()` 成功注册命名空间，设置客户端即可枚举到「图像识别」分区，无需任何额外配置；
-> ④ 单测 **93/93** 全绿（原 73 + 新增 20），含设置 schema 键一致性、env 映射、运行时快照热生效与 client bundle 冒烟断言；
-> ⑤ 双形态发布不变：`vision-exp-tile-v0.3.0.zip`（完整版）+ `vision-exp-tile-v0.3.0-nopython.zip`（零配置版）。
+> **本次更新（v0.3.1）完全由 DeepSeek Harness 自主完成**，内容：
+> ① **修复 DSH 0.1.1-rc.2 兼容**：客户端 settingsScope 在新版 DSH 上可能没有 load() 方法（picturereader 3.0.6 同款防御）——修复后「图像识别」设置分区在 rc.2 上内容正常显示（不再空白）；
+> ② **发布资产修正**：v0.3.0 的 zip 曾漏打包 client.js（设置界面文件），v0.3.1 起双形态 zip 已包含；v0.3.0 资产已同步补正；
+> ③ 本机全部适应性改造（DSH 升级 rc.2 + 插件共存适配）已同步入此版本。
 
 # vision-exp-tile ◆ 为 deepseek-v4-flash-vision-exp 定制的大图智能识图插件
 
@@ -19,7 +17,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org)
-[![version](https://img.shields.io/badge/vision--exp--tile-v0.3.0-orange.svg)](#)
+[![version](https://img.shields.io/badge/vision--exp--tile-v0.3.1-orange.svg)](#)
 [![DSH](https://img.shields.io/badge/DeepSeek%20Harness-plugin-purple.svg)](#)
 
 > 独立 DSH 插件：**零依赖任何第三方 DSH 插件**（picturereader 等均未使用，仅用纯官方 DSH 服务 + 可选开源 OCR 环境）。把大图切成 **800×800 无损小块**（官方缩放规则的"甜蜜点"：块在模型侧**不被降采样**、每块**≤384 token**），携带**坐标标注 + 分块聚合逻辑**直接调用 DeepSeek 视觉 API 完成识别与聚合，返回结构化答案（**不统计 token、不计算费用**）。
@@ -216,3 +214,4 @@ MIT © vision-exp-tile contributors
 ---
 
 如果这个插件对你有帮助，欢迎点个 ⭐ **Star** 支持一下～（你的支持就是持续更新的动力）
+

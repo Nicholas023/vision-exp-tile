@@ -1,8 +1,16 @@
 # 更新日志（Release Changelog）
 
-> 全部版本记录（v0.1.0 → v0.3.0），最新在上；本文件 = GitHub Release 的 changelog 栏（由 .github/workflows/release.yml 自动读取）。
+> 全部版本记录（v0.1.0 → v0.3.1），最新在上；本文件 = GitHub Release 的 changelog 栏（由 .github/workflows/release.yml 自动读取）。
 > 注：README 只展示最新一期更新内容（使用者视角）；本文件保留每期完整记录（含历史）。
 
+## v0.3.1（2026-08-23）
+
+**本次更新完全由 DeepSeek Harness 自主完成。** 补丁：修复 DSH 0.1.1-rc.2 兼容。
+
+### 修复
+
+1. **设置分区内容空白（DSH 0.1.1-rc.2 兼容）**：升级 DSH 到 0.1.1-rc.2 后，客户端 settingsScope 不再提供 load() 方法；client.js 原无条件调用导致分区渲染异常。修复：if (typeof scope.load === "function") scope.load()（与 picturereader 3.0.6 同款防御），rc.7/rc.2 双兼容。
+2. **发布资产修正**：release workflow 打包清单补上 client.js（v0.3.0 的 zip 曾漏打包设置界面文件）；v0.3.0 资产补正（zip 已含 client.js）。
 ## v0.3.0（2026-08-23）
 
 **本次更新完全由 DeepSeek Harness 自主完成。**
@@ -120,3 +128,5 @@
 - 确立三种策略框架：smart（模型编排）/ full（全图网格切块）/ 区域裁剪识别；
 - 明确官方规则：图片仅限 user 消息、384×384 放大、≈800×800 缩放、每张 ≤384 token；
 - 为后续纯净版（v0.1.1）与完整版构建奠定基础。
+
+

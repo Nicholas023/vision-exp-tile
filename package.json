@@ -1,7 +1,7 @@
 {
   "name": "vision-exp-tile",
-  "version": "0.3.0",
-  "description": "为 deepseek-v4-flash-vision-exp 量身定制的大图智能识图插件：整图预检 → 本地 OCR+像素网格（文字）+ 兴趣点按比例切块（最长边 800）→ 汇总；保留全图 800x800 网格切块模式。不统计 token、不计算费用。v0.3.0：新增 DSH Web 设置页「图像识别」分区，可编辑插件全部配置并即时生效（DSH settings.yaml 持久化）。",
+  "version": "0.3.1",
+  "description": "为 deepseek-v4-flash-vision-exp 量身定制的大图智能识图插件：整图预检 → 本地 OCR+像素网格（文字）+ 兴趣点按比例切块（最长边 800）→ 汇总；保留全图 800x800 网格切块模式。不统计 token、不计算费用。v0.3.1：新增 DSH Web 设置页「图像识别」分区，可编辑插件全部配置并即时生效（DSH settings.yaml 持久化）。",
   "type": "module",
   "main": "src/index.js",
   "exports": {
