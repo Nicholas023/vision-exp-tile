@@ -9,6 +9,11 @@
  * 形态：裸工具对象 + ctx.tools.register（不引入 defineTool，保持与官方工具一致的注册方式）。
  * 不引入新依赖，仅使用 node:path / node:fs/promises 与既有 src 模块。
  *
+ * v0.3.0：新增「图像识别」设置命名空间（NS='vision-exp-tile'），在 DSH Web 设置页
+ * 注册配置分区，配置以 settings.yaml 持久化、运行时热生效；工具执行时经
+ * getRuntimeConfig() 惰性读最新设置（优先级：工具参数 > 设置页 > 默认值），
+ * OCR 引擎/池等参数经 applySettingsEnv() 写入 process.env 于下次工具调用生效。
+ *
  * @module vision-exp-tile
  */
 
@@ -20,7 +25,11 @@ import { splitImage, tileFileName, cropRegion, normalizeRect } from './tile-engi
 import { buildSplitResultText } from './prompts.js';
 import { recognize, previewImage, recognizeRegion } from './vision-client.js';
 import { runPipeline } from './pipeline.js';
-import { normalizeConfig } from './config.js';
+import { NS, normalizeConfig } from './config.js';
+import { settingsNamespace } from '@deepseek-ai/dsh-settings';
+import z from '@deepseek-ai/schemastery';
+import { SettingsSchema, toSettingsBase } from './settings-schema.js';
+import { setRuntimeSource, getRuntimeConfig, applySettingsEnv, normalizeFromSettings } from './runtime.js';
 
 /** 插件名（供 DSH 加载器识别）。 */
 export const name = 'vision-exp-tile';
@@ -66,6 +75,19 @@ function readBool(raw, fallback, label, tool) {
   if (typeof raw === 'boolean') return raw;
   if (raw === 'true' || raw === 'false') return raw === 'true';
   throw new Error(`${tool}: ${label} 仅接受 true/false`);
+}
+
+/**
+ * 调试日志（仅在运行时配置 debug=true 时输出；默认关闭，不影响正常行为）。
+ * @param {object} ctx - Cordis 上下文（提供 ctx.logger）。
+ * @param {string} message - 日志内容。
+ */
+function debugLog(ctx, message) {
+  try {
+    ctx.logger?.info?.(`[vision-exp-tile] ${message}`);
+  } catch {
+    // 日志失败不影响功能。
+  }
 }
 
 /**
@@ -414,6 +436,7 @@ export function createSplitTool(ctx, cfg) {
     }),
     async execute(args, exec) {
       if (exec.signal?.aborted) throw new Error(`${tool}: 已取消`);
+      if (cfg.debug) debugLog(ctx, `${tool} 开始切图：block_size=${cfg.blockSize} overlap=${cfg.overlap} cut_threshold=${cfg.cutThreshold}`);
       const img = await loadImageAndSplit(ctx, exec, args, cfg, tool);
       const { r } = img;
 
@@ -572,6 +595,7 @@ export function createRecognizeTool(ctx, cfg) {
     }),
     async execute(args, exec) {
       if (exec.signal?.aborted) throw new Error(`${tool}: 已取消`);
+      if (cfg.debug) debugLog(ctx, `${tool} 开始识别：model=${cfg.model} mode=${cfg.mode} max_tokens=${cfg.maxTokens} ocr_engine=${cfg.ocr_engine}`);
 
       // 1. 解析 API key（环境变量优先，本机凭据文件兜底；均无则给出明确错误）。
       const apiKey = await resolveApiKey(cfg);
@@ -641,7 +665,10 @@ export function createRecognizeTool(ctx, cfg) {
         const interestConcurrency = args.interest_concurrency === undefined
           ? undefined
           : readInt(args.interest_concurrency, 2, 1, 4, 'interest_concurrency', tool);
-        const preprocessMode = args.preprocess === 'off' ? 'off' : 'auto';
+        // 前处理优先级：显式参数(工具调用) > 设置页(cfg.preprocess) > 默认 auto。
+        const preprocessMode = args.preprocess !== undefined
+          ? (args.preprocess === 'off' ? 'off' : 'auto')
+          : (String(cfg.preprocess ?? 'auto') === 'off' ? 'off' : 'auto');
         const upgradeMode = ['full', 'low', 'off'].includes(String(args.upgrade ?? ''))
           ? String(args.upgrade)
           : 'default';
@@ -852,6 +879,7 @@ export function createRegionCropTool(ctx, cfg) {
     }),
     async execute(args, exec) {
       if (exec.signal?.aborted) throw new Error(`${tool}: 已取消`);
+      if (cfg.debug) debugLog(ctx, `${tool} 区域裁剪：rect=${JSON.stringify(args.rect ?? [])} max_edge=${args.max_edge ?? 800} recognize=${args.recognize ?? true}`);
       const img = await loadImageBytes(ctx, exec, args, tool);
       const rect = args.rect;
       if (!Array.isArray(rect) || rect.length !== 4) {
@@ -919,15 +947,68 @@ export function createRegionCropTool(ctx, cfg) {
 
 /**
  * DSH 插件入口：注册 vision_tile_split / vision_tile_recognize / vision_region_crop 三个工具。
+ *
+ * v0.3.0 设置说明：
+ *  - 新增「图像识别」设置命名空间（NS='vision-exp-tile'），在 DSH Web 设置页
+ *    注册分区，配置以 dsh settings.yaml 持久化、运行时热生效。
+ *  - 可见性由 dsh 的 settings.describe() 自动枚举（rc.7+ 无白名单），无需额外暴露。
+ *  - 工具执行时经 getRuntimeConfig() 惰性读取最新设置，优先级：
+ *    工具参数(显式) > 设置页 > 默认值；env 映射（OCR 引擎/池等）在下次工具调用生效。
+ *
  * @param {object} ctx - Cordis 上下文。
  * @param {object} [configRaw] - 用户配置（可 undefined，此时走 DEFAULT_CONFIG）。
  */
 export function apply(ctx, configRaw) {
   // configRaw 可为 undefined，normalizeConfig 负责合并默认并校验。
   const cfg = normalizeConfig(configRaw);
-  ctx.effect(() => {
-    ctx.tools.register(createSplitTool(ctx, cfg));
-    ctx.tools.register(createRecognizeTool(ctx, cfg));
-    ctx.tools.register(createRegionCropTool(ctx, cfg));
+
+  // ── 运行时快照：工具执行时惰性读最新设置；
+  //    sourceGetter 为 null（无 settings 服务或尚未注册）时回退到初始 cfg。──
+  let sourceGetter = null;
+  const getConfig = () => (sourceGetter ? sourceGetter() : cfg);
+  setRuntimeSource(getConfig);
+
+  // 让工具读取「实时」配置：用 Proxy 把 cfg.xxx 转到 getRuntimeConfig()。
+  // 这样「工具参数(显式) > 设置页 > 默认值」的优先级天然成立——参数在工具内部
+  // 覆盖 cfg，而 cfg 每次读取都拿到最新设置快照，改设置即热生效。
+  const liveCfg = new Proxy({}, {
+    get(_t, prop) {
+      const live = getRuntimeConfig();
+      return live ? live[prop] : undefined;
+    }
   });
+
+  ctx.effect(() => {
+    ctx.tools.register(createSplitTool(ctx, liveCfg));
+    ctx.tools.register(createRecognizeTool(ctx, liveCfg));
+    ctx.tools.register(createRegionCropTool(ctx, liveCfg));
+  });
+
+  // ── v0.3.0：注册「图像识别」设置命名空间 + 订阅热更 ──
+  try {
+    ctx.inject(['settings'], (sctx) => {
+      // base 用 toSettingsBase(configRaw)：把 configRaw 的 camelCase 键转成
+      // snake_case，作为第 2 层（低于用户设置页、高于 schema 默认）参与解析，
+      // 避免 schema 默认值遮蔽 configRaw 里用户显式写的 baseURL 等。
+      const scope = sctx.settings.register(
+        settingsNamespace(NS),
+        SettingsSchema,
+        { base: toSettingsBase(configRaw) }
+      );
+      // 读取时实时归一化（scope.get() 已含 schema默认 + configRaw base + 用户设置）。
+      sourceGetter = () => normalizeFromSettings(scope.get());
+      // 首次应用一次设置页的环境变量映射（OCR 引擎/池等）。
+      applySettingsEnv(scope.get());
+      // 订阅变化：设置更新时重新应用 env（进程池参数在下次工具调用生效）。
+      scope.watch(() => {
+        try {
+          applySettingsEnv(scope.get());
+        } catch (error) {
+          ctx.logger?.warn?.(`[vision-exp-tile] 应用设置 env 失败：${String(error)}`);
+        }
+      });
+    });
+  } catch (error) {
+    ctx.logger?.warn?.(`[vision-exp-tile] settings 注册失败：${String(error)}`);
+  }
 }

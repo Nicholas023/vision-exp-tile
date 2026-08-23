@@ -6,13 +6,12 @@
 
 各位随意取用：有问题可以提交 **Issue**（如果能自己改的话就更好了——你提交了 Issue，我也只能给 DeepSeek 看然后让他自己改；我本人尝试过多次，均未学会任何写代码的能力，也是乘上 **AI** 的东风，让我有了开发插件的能力）。
 
-> **本次更新（v0.2.0）完全由 DeepSeek Harness 自主完成**，内容：
-> ① **OCR 前处理管线**（`preprocess.js`，纯本地零新依赖）：深底白字图**自动反色**、低对比图 **Otsu 二值化**、手写/小字 **≤2× 放大**、百分位对比度拉伸；纯色/高对比印刷体自动跳过（零副作用）；`DSH_OCR_PREPROC=0` 关闭；
-> ② **手写判别分流增强**：预处理 + Paddle 高精度模型（`DSH_OCR_MODEL=server`，PP-OCRv4_server_rec，下载失败自动回退）+ **手写/低置信/深底失败区域自动升级视觉 API 转录**（`DSH_OCR_UPGRADE=full|low|off`）；
-> ③ **可行性验证通过**：深底图 0→4 行；手写页行数 ×1.23；印刷体漏检 0/10；判别器 15 样本（5 手写+10 印刷）校准 **100% 分离**（阈值 0.55）；单测 **73/73**；`preprocess`/`upgrade` 新参数向后兼容；
-> ④ 实测：手写页视觉 API ≈¥0.01-0.05/页；本地前处理单区域 +50-200ms；
-> ⑤ **手写判别分流**：每个文字区先判别是否手写——**预检视觉标记**（模型预检时输出 `isHandwrite`）+ **本地启发式判别器**（`src/handwrite.js`，笔画连通域密度/行投影起伏/笔画占比）**smart 互验**（分歧时视觉优先）；**手写区域**直接视觉 API 转录（逐行，看不清用（？）标注）；**非手写区域**高效本地 OCR 且**不放大**（省 ~60% 耗时）；`DSH_OCR_HANDWRITE=smart|visual|local|off`；
-> 双形态发布不变：`vision-exp-tile-v0.2.0.zip`（完整版）+ `vision-exp-tile-v0.2.0-nopython.zip`（零配置版）。
+> **本次更新（v0.3.0）完全由 DeepSeek Harness 自主完成**，内容：
+> ① **DSH Web 设置页新增「图像识别」分区**：可编辑插件全部配置——识别入口（OCR 引擎/前处理/手写路由/自动升级）、视觉 API 端点（Base URL/模型/API key 环境变量）、切图参数（块边长/切分阈值/交叠/组大小/Tokens/超时/格式/质量/模式/JSON/overview/输出目录/旋转）、并行与缓存（兴趣点并发/OCR 池/缓存/前处理开关）、调试日志；
+> ② **设置以 DSH settings.yaml 持久化、运行时热生效**：保存后立即生效，无需重启；进程池参数（OCR 引擎/池大小）在下次工具调用时生效；工具调用显式参数仍 > 设置页 > 默认值；
+> ③ **设置分区经 dsh 的 settings.describe() 自动暴露**（rc.7+ 已取消硬编码白名单、改为枚举注册的命名空间）：宿主侧 `register()` 成功注册命名空间，设置客户端即可枚举到「图像识别」分区，无需任何额外配置；
+> ④ 单测 **93/93** 全绿（原 73 + 新增 20），含设置 schema 键一致性、env 映射、运行时快照热生效与 client bundle 冒烟断言；
+> ⑤ 双形态发布不变：`vision-exp-tile-v0.3.0.zip`（完整版）+ `vision-exp-tile-v0.3.0-nopython.zip`（零配置版）。
 
 # vision-exp-tile ◆ 为 deepseek-v4-flash-vision-exp 定制的大图智能识图插件
 
@@ -20,7 +19,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org)
-[![version](https://img.shields.io/badge/vision--exp--tile-v0.1.4-orange.svg)](#)
+[![version](https://img.shields.io/badge/vision--exp--tile-v0.3.0-orange.svg)](#)
 [![DSH](https://img.shields.io/badge/DeepSeek%20Harness-plugin-purple.svg)](#)
 
 > 独立 DSH 插件：**零依赖任何第三方 DSH 插件**（picturereader 等均未使用，仅用纯官方 DSH 服务 + 可选开源 OCR 环境）。把大图切成 **800×800 无损小块**（官方缩放规则的"甜蜜点"：块在模型侧**不被降采样**、每块**≤384 token**），携带**坐标标注 + 分块聚合逻辑**直接调用 DeepSeek 视觉 API 完成识别与聚合，返回结构化答案（**不统计 token、不计算费用**）。

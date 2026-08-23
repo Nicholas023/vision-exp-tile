@@ -1,7 +1,31 @@
 # 更新日志（Release Changelog）
 
-> 全部版本记录（v0.1.0 → v0.2.0），最新在上；本文件 = GitHub Release 的 changelog 栏（由 .github/workflows/release.yml 自动读取）。
+> 全部版本记录（v0.1.0 → v0.3.0），最新在上；本文件 = GitHub Release 的 changelog 栏（由 .github/workflows/release.yml 自动读取）。
 > 注：README 只展示最新一期更新内容（使用者视角）；本文件保留每期完整记录（含历史）。
+
+## v0.3.0（2026-08-23）
+
+**本次更新完全由 DeepSeek Harness 自主完成。**
+
+### 新功能
+
+1. **DSH Web 设置页「图像识别」分区**（client.js，浏览器半侧手写 ModuleLoader bundle）：可编辑插件全部配置，按「基础 + 高级折叠」分组展示；枚举用 select、布尔用 checkbox、数值用 number、文本用 text；保存=全部写入设置命名空间（数值转 number、布尔保留、空串 unset 走默认），重置=全部 unset 恢复默认。
+2. **设置命名空间 + schemastery schema**（`src/settings-schema.js`）：`SETTINGS_NS='vision-exp-tile'`，`SettingsSchema` 用 z.object 描述全部 25 个字段（枚举、布尔、数值带 min/max/default、中文 description）；`SETTINGS_FIELDS` 为 client 与测试复用的扁平字段清单（key/type/labelKey/advanced/options/configKey/envKey）。
+3. **运行时快照 + 热生效**（`src/runtime.js`）：`setRuntimeSource` / `getRuntimeConfig`（惰性重读实现改设置即生效）；`normalizeFromSettings` 把 snake_case 映射为 camelCase（base_url→baseURL 等）并经 `normalizeConfig` 归一化；优先级 = 工具参数(显式) > 设置页 > 默认值。
+4. **env 映射**：OCR 引擎/池/缓存/前处理/手写路由/升级/兴趣点并发等以 `envFromSettings` + `applySettingsEnv` 写入 `DSH_*` 环境变量；仅在用户未显式设置时回退写入（用户 env 优先），设置改回默认时自动清理残留；池参数在下次工具调用生效。
+5. **设置分区自动暴露**：dsh(`dsh-host-apiproxy` >=0.1.0-rc.7)已改用 `settings.describe()` 枚举注册的命名空间、无硬编码 `WEB_SETTINGS_NAMESPACES` 白名单，故只需 `register()` 成功注册、设置客户端即可枚举到「图像识别」分区，无需任何额外暴露文件。
+6. **入口接入**（`src/index.js`）：注册命名空间（base 用 `toSettingsBase(configRaw)` 保证 configRaw 与设置页正确分层）；工具执行时经 `getRuntimeConfig()` 读最新配置（Proxy 转发）；新增 `debug` 调试日志钩子。
+
+### 设计要点
+
+- 新的设置命名空间独立于旧 configRaw（DEFAULT_CONFIG）；`toSettingsBase` 把 configRaw 的 camelCase 键转为 snake_case 作为第 2 层 base，避免 schema 默认值遮蔽用户显式写入的配置。
+- 工具执行时经 `getRuntimeConfig()` 惰性读取，参数覆盖 cfg（显式参数优先语义不变）。
+
+### 验证
+
+单测 **93/93** 全绿（原 73 + 新增 20：`settings.test.js` 12 项 + `client-bundle.test.js` 5 项 + 第 93 项为既有套件累计）；覆盖设置 schema 键一致性、snake→camel 键映射、env 映射与热生效、运行时快照、client bundle 冒烟断言。
+
+---
 
 ## v0.2.0（2026-08-23）
 

@@ -1,0 +1,177 @@
+/**
+ * settings-schema.js — vision-exp-tile「图像识别」设置命名空间的 schemastery 定义
+ *
+ * v0.3.0：在 DSH Web 设置页新增「图像识别」分区，可编辑插件全部配置并以 DSH
+ * settings.yaml 持久化、运行时生效。本模块用 @deepseek-ai/schemastery 描述该
+ * 命名空间的扁平字段（snake_case key），供宿主机 ctx.settings.register() 解析、
+ * DSH 配置界面渲染，并给浏览器半侧 client.js 复用于字段渲染。
+ *
+ * 设计要点：
+ *  - 字段一律用扁平 key（与 picturereader 一致），YAML 无嵌套歧义。
+ *  - 枚举用 z.string().default(...)（+ description 中文，字段值域在 UI 以
+ *    select 约束，真正的合法化在 config.js 的 normalizeConfig）；数值用
+ *    z.number().min().max().default(...)；布尔用 z.boolean().default(...)。
+ *  - 数值范围与 src/config.js 的 normalizeConfig 校验范围保持一致；但跨字段
+ *    约束（如 overlap 上限依赖 block_size）仍由 normalizeConfig 统一判定。
+ *  - SETTINGS_FIELDS 是 client.js 与测试共用的「扁平字段清单」，每个字段带
+ *    key / type / labelKey / advanced / options / configKey / envKey 元信息：
+ *      * type      — enum / number / boolean / text，决定 UI 控件类型。
+ *      * advanced  — true 时折叠进「高级设置」details。
+ *      * options   — enum 的可选值（供 select 渲染）。
+ *      * configKey — snake_case → 配置对象（camelCase，normalizeConfig 输出）键。
+ *      * envKey    — 该字段映射的环境变量（供 runtime.envFromSettings 使用）。
+ *
+ * @module vision-exp-tile/settings-schema
+ */
+
+import z from '@deepseek-ai/schemastery';
+
+/** 本插件拥有的设置命名空间名（与 config.js 的 NS 保持一致）。 */
+export const SETTINGS_NS = 'vision-exp-tile';
+
+/**
+ * 设置命名空间的 schemastery schema。
+ *
+ * resolve 顺序（dsh-settings）：schema 默认值 < composition base < 用户文档分节。
+ * base 由 index.js 传入（configRaw 转 snake_case 后的对象），因此：
+ * 用户设置页 > configRaw（settings.yaml）> schema 默认值。
+ */
+export const SettingsSchema = z.object({
+  // ── 基础（advanced=false）─────────────────────────────────────────────
+  ocr_engine: z
+    .string()
+    .default('auto')
+    .description('本地 OCR 引擎：auto=优先 rapid 自动降级（默认）/ windows / paddle / rapid。映射环境变量 DSH_OCR_ENGINE，auto=不设置=自动降级'),
+  preprocess: z
+    .string()
+    .default('auto')
+    .description('OCR 前处理：auto=深底自动反色/低对比二值化/手写放大（默认）；off=关闭；auto-enlarge-off=自动+禁用手写放大'),
+  handwrite_route: z
+    .string()
+    .default('smart')
+    .description('手写路由：smart=自动判定（默认）/ visual=转视觉 API / local=本地 / off=关闭。映射环境变量 DSH_OCR_HANDWRITE'),
+  upgrade: z
+    .string()
+    .default('full')
+    .description('自动升级：full=低置信或手写或深底失败时转视觉 API 转录（默认）；low=仅低置信；off=关闭。映射环境变量 DSH_OCR_UPGRADE'),
+  base_url: z
+    .string()
+    .default('https://api.deepseek.com')
+    .description('DeepSeek 视觉 API Base URL（OpenAI 兼容 chat/completions）'),
+  model: z.string().default('deepseek-v4-flash-vision-exp').description('视觉模型名'),
+  api_key_env: z.string().default('DEEPSEEK_API_KEY').description('读取 DeepSeek API key 的环境变量名'),
+
+  // ── 高级（advanced=true）──────────────────────────────────────────────
+  block_size: z
+    .number()
+    .min(64)
+    .max(4096)
+    .default(800)
+    .description('高级：块边长（px）；800 是官方缩放甜蜜点（800×800 块不降采样、每块 ≤384 token）'),
+  cut_threshold: z
+    .number()
+    .min(64)
+    .max(8192)
+    .default(800)
+    .description('高级：长边超过此值才切分；800×800 及以下不切（单图可直接识别）'),
+  overlap: z
+    .number()
+    .min(0)
+    .max(2047)
+    .default(0)
+    .description('高级：相邻块交叠像素（0..块边长/2-1），推荐 64 防跨块切断。上限随 block_size 变，见 normalizeConfig'),
+  group_size: z.number().min(1).max(240).default(40).description('高级：分层聚合模式每组最多块数'),
+  max_tokens: z.number().min(256).max(65536).default(8192).description('高级：单次请求输出 token 上限'),
+  timeout_ms: z.number().min(1000).max(3600000).default(300000).description('高级：单次请求超时（毫秒）'),
+  format: z.string().default('png').description('高级：块格式 png=无损（默认）/ jpeg=更省请求体'),
+  quality: z.number().min(40).max(100).default(90).description('高级：jpeg 质量（40..100），仅 jpeg 有效'),
+  mode: z.string().default('auto').description('高级：识别模式 auto=自动 / single=单请求 / layered=分层聚合'),
+  json: z.boolean().default(false).description('高级：true=要求模型输出 JSON 对象（结构化结果）'),
+  with_overview: z.boolean().default(true).description('高级：是否同时生成 overview 缩略图（网格+块号，辅助全局布局）'),
+  out_dir: z.string().default('').description('高级：块输出目录；空=默认原图同目录 <原名>_tiles 子目录'),
+  rotate: z
+    .number()
+    .min(0)
+    .max(270)
+    .default(0)
+    .description('高级：识别前顺时针旋转角度 0/90/180/270（用于"误判方向"场景）'),
+  interest_concurrency: z
+    .number()
+    .min(1)
+    .max(4)
+    .default(2)
+    .description('高级：兴趣点视觉识别并行数（1..4，并发大易触发 429）。映射环境变量 DSH_INTEREST_CONCURRENCY'),
+  ocr_pool: z
+    .number()
+    .min(0)
+    .max(8)
+    .default(4)
+    .description('高级：本地 OCR 池大小 0..8（0=禁用回退旧逻辑）。映射环境变量 DSH_OCR_POOL'),
+  ocr_cache: z
+    .boolean()
+    .default(true)
+    .description('高级：本地 OCR 结果缓存。true=启用（默认，不设环境变量）；false=设 DSH_OCR_CACHE=0 禁用'),
+  ocr_preproc: z
+    .boolean()
+    .default(true)
+    .description('高级：OCR 前处理开关。true=启用（默认，不设环境变量）；false=设 DSH_OCR_PREPROC=0 禁用'),
+  debug: z.boolean().default(false).description('高级：调试日志（写日志，不映射环境变量）'),
+});
+
+/**
+ * 设置字段的扁平清单。
+ *
+ * 每个字段 {key, type, labelKey, advanced, ...}；type 决定 client.js 的渲染控件。
+ * 顺序即配置界面展示顺序：基础在前，高级在后（折叠）。
+ * configKey / envKey 供 runtime.js 做 snake_case→camelCase 映射与 env 写入。
+ */
+export const SETTINGS_FIELDS = [
+  // 基础
+  { key: 'ocr_engine', type: 'enum', labelKey: 'ocrEngine', advanced: false, options: ['auto', 'windows', 'paddle', 'rapid'], envKey: 'DSH_OCR_ENGINE' },
+  { key: 'preprocess', type: 'enum', labelKey: 'preprocess', advanced: false, options: ['auto', 'off', 'auto-enlarge-off'] },
+  { key: 'handwrite_route', type: 'enum', labelKey: 'handwriteRoute', advanced: false, options: ['smart', 'visual', 'local', 'off'], envKey: 'DSH_OCR_HANDWRITE' },
+  { key: 'upgrade', type: 'enum', labelKey: 'upgrade', advanced: false, options: ['full', 'low', 'off'], envKey: 'DSH_OCR_UPGRADE' },
+  { key: 'base_url', type: 'text', labelKey: 'baseUrl', advanced: false, configKey: 'baseURL' },
+  { key: 'model', type: 'text', labelKey: 'model', advanced: false, configKey: 'model' },
+  { key: 'api_key_env', type: 'text', labelKey: 'apiKeyEnv', advanced: false, configKey: 'apiKeyEnv' },
+  // 高级
+  { key: 'block_size', type: 'number', labelKey: 'blockSize', advanced: true, configKey: 'blockSize' },
+  { key: 'cut_threshold', type: 'number', labelKey: 'cutThreshold', advanced: true, configKey: 'cutThreshold' },
+  { key: 'overlap', type: 'number', labelKey: 'overlap', advanced: true, configKey: 'overlap' },
+  { key: 'group_size', type: 'number', labelKey: 'groupSize', advanced: true, configKey: 'groupSize' },
+  { key: 'max_tokens', type: 'number', labelKey: 'maxTokens', advanced: true, configKey: 'maxTokens' },
+  { key: 'timeout_ms', type: 'number', labelKey: 'timeoutMs', advanced: true, configKey: 'timeoutMs' },
+  { key: 'format', type: 'enum', labelKey: 'format', advanced: true, options: ['png', 'jpeg'], configKey: 'format' },
+  { key: 'quality', type: 'number', labelKey: 'quality', advanced: true, configKey: 'quality' },
+  { key: 'mode', type: 'enum', labelKey: 'mode', advanced: true, options: ['auto', 'single', 'layered'], configKey: 'mode' },
+  { key: 'json', type: 'boolean', labelKey: 'json', advanced: true, configKey: 'json' },
+  { key: 'with_overview', type: 'boolean', labelKey: 'withOverview', advanced: true, configKey: 'withOverview' },
+  { key: 'out_dir', type: 'text', labelKey: 'outDir', advanced: true, configKey: 'outDir' },
+  { key: 'rotate', type: 'enum', labelKey: 'rotate', advanced: true, options: ['0', '90', '180', '270'], configKey: 'rotate' },
+  { key: 'interest_concurrency', type: 'number', labelKey: 'interestConcurrency', advanced: true, configKey: 'interestConcurrency', envKey: 'DSH_INTEREST_CONCURRENCY' },
+  { key: 'ocr_pool', type: 'number', labelKey: 'ocrPool', advanced: true, configKey: 'ocrPool', envKey: 'DSH_OCR_POOL' },
+  { key: 'ocr_cache', type: 'boolean', labelKey: 'ocrCache', advanced: true, configKey: 'ocrCache', envKey: 'DSH_OCR_CACHE' },
+  { key: 'ocr_preproc', type: 'boolean', labelKey: 'ocrPreproc', advanced: true, configKey: 'ocrPreproc', envKey: 'DSH_OCR_PREPROC' },
+  { key: 'debug', type: 'boolean', labelKey: 'debug', advanced: true },
+];
+
+/**
+ * 把插件既有的 camelCase 配置（configRaw，来自 settings.yaml / DEFAULT_CONFIG）
+ * 映射成 snake_case，用于作为 dsh-settings 注册时的 composition base。
+ *
+ * 目的：让 configRaw 的值以「低于用户设置页、高于 schema 默认值」的第 2 层
+ * 参与解析——否则 schema 默认值（如 base_url=https://api.deepseek.com）会
+ * 覆盖 configRaw 中用户显式写的 baseURL。
+ *
+ * @param {object} [configRaw] - 插件的原始配置（camelCase）。
+ * @returns {object} snake_case 的 base 层（仅有值映射；undefined/空返回 {}）。
+ */
+export function toSettingsBase(configRaw) {
+  const src = configRaw && typeof configRaw === 'object' ? configRaw : {};
+  const base = {};
+  for (const f of SETTINGS_FIELDS) {
+    if (!f.configKey) continue; // 纯设置项（无对应 camelCase 配置键）不进 base
+    if (src[f.configKey] !== undefined) base[f.key] = src[f.configKey];
+  }
+  return base;
+}
