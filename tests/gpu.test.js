@@ -10,8 +10,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { existsSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { SETTINGS_NS, SettingsSchema, SETTINGS_FIELDS } from '../src/settings-schema.js';
 import { envFromSettings, normalizeFromSettings } from '../src/runtime.js';
 import {
@@ -72,14 +72,18 @@ test('resolveGpuProvider：off 强制 cpu；大小写/空值容错', () => {
 
 test('gpuPython：DSH_OCR_GPU_PYTHON 指向存在文件 → 返回该路径；不存在 → null', () => {
   const snap = snapEnv();
+  // 用临时目录自建"存在文件"，避免依赖本机 venv 是否存在（CI/Linux 通用）
+  const tmp = mkdtempSync(join(tmpdir(), 'gpu-py-'));
   try {
-    const realPy = process.env.DSH_RAPID_PYTHON ?? join(homedir(), 'rapid_venv', 'Scripts', 'python.exe');
+    const realPy = join(tmp, 'python.exe');
+    writeFileSync(realPy, ''); // 创建空文件即视为"存在"
     process.env.DSH_OCR_GPU_PYTHON = realPy;
     assert.equal(gpuPython(), realPy);
-    const bad = join(homedir(), 'no_such_venv', 'nope', 'python.exe');
+    const bad = join(tmp, 'no_such', 'python.exe');
     process.env.DSH_OCR_GPU_PYTHON = bad;
     assert.equal(gpuPython(), null);
   } finally {
+    rmSync(tmp, { recursive: true, force: true });
     restoreEnv(snap);
   }
 });
