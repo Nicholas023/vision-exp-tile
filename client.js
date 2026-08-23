@@ -114,6 +114,12 @@ window.__ModuleLoader__.load({
       gpuPython: "GPU venv 解释器路径",
       gpuDevice: "GPU 设备索引",
       gpuFallback: "GPU 失败时回退 CPU",
+      ocrPoolTimeoutMs: "OCR 池单请求超时（毫秒）",
+      performanceTier: "性能档位",
+      testTimeoutFactor: "测试超时倍率",
+      testSkipTiming: "跳过时序敏感断言",
+      deviceProfile: "设备画像（只读）",
+      deviceProfileEmpty: "（待运行时探测完成后自动填充）",
       preprocessAuto: "auto（深底自动反色/低对比二值化/手写放大，默认）",
       preprocessOff: "off（关闭前处理）",
       preprocessAutoEnlargeOff: "auto-enlarge-off（自动 + 禁用手写放大）",
@@ -133,6 +139,10 @@ window.__ModuleLoader__.load({
       rotate90: "90°",
       rotate180: "180°",
       rotate270: "270°",
+      performanceTierAuto: "auto（自动探测，默认）",
+      performanceTierFast: "fast（健壮机型）",
+      performanceTierNormal: "normal（常规机型）",
+      performanceTierSlow: "slow（较差机型，自动放宽超时/降并发/关GPU）",
     };
     var en = {
       nav: "Image Recognition",
@@ -184,6 +194,12 @@ window.__ModuleLoader__.load({
       gpuPython: "GPU venv interpreter path",
       gpuDevice: "GPU device index",
       gpuFallback: "Fallback to CPU on GPU failure",
+      ocrPoolTimeoutMs: "OCR pool per-request timeout (ms)",
+      performanceTier: "Performance tier",
+      testTimeoutFactor: "Test timeout factor",
+      testSkipTiming: "Skip timing-sensitive asserts",
+      deviceProfile: "Device profile (read-only)",
+      deviceProfileEmpty: "(auto-filled after runtime device probe)",
       preprocessAuto: "auto (dark-invert/binarize/handwrite enlarge; default)",
       preprocessOff: "off (disable preprocess)",
       preprocessAutoEnlargeOff: "auto-enlarge-off (auto + disable handwrite enlarge)",
@@ -203,6 +219,10 @@ window.__ModuleLoader__.load({
       rotate90: "90°",
       rotate180: "180°",
       rotate270: "270°",
+      performanceTierAuto: "auto (auto-detect; default)",
+      performanceTierFast: "fast (beefy machine)",
+      performanceTierNormal: "normal (regular machine)",
+      performanceTierSlow: "slow (weak machine; auto-relax timeout/lower concurrency/off GPU)",
     };
 
     // ── field spec（与 src/settings-schema.js 的 SETTINGS_FIELDS 一一对应）────
@@ -243,6 +263,12 @@ window.__ModuleLoader__.load({
       { key: "gpu_python", type: "text", labelKey: "gpuPython", advanced: true },
       { key: "gpu_device", type: "text", labelKey: "gpuDevice", advanced: true },
       { key: "gpu_fallback", type: "boolean", labelKey: "gpuFallback", advanced: true },
+      // v0.4.1：慢机测试自适应（device_profile 为只读展示字段，不参与保存/重置）
+      { key: "ocr_pool_timeout_ms", type: "number", labelKey: "ocrPoolTimeoutMs", advanced: true },
+      { key: "performance_tier", type: "enum", labelKey: "performanceTier", advanced: true, options: OPT(["Auto", "Fast", "Normal", "Slow"], "performanceTier"), mapOptions: ["auto", "fast", "normal", "slow"] },
+      { key: "test_timeout_factor", type: "number", labelKey: "testTimeoutFactor", advanced: true },
+      { key: "test_skip_timing", type: "boolean", labelKey: "testSkipTiming", advanced: true },
+      { key: "device_profile", type: "text", labelKey: "deviceProfile", advanced: true, readonly: true },
       { key: "debug", type: "boolean", labelKey: "debug", advanced: true },
     ];
 
@@ -336,6 +362,7 @@ window.__ModuleLoader__.load({
         setBusy(true); setNotice(null); setError(null);
         var ops = [];
         FIELDS.forEach(function (f) {
+          if (f.readonly) return; // 只读展示字段（device_profile）不参与保存
           if (f.type === "boolean") {
             ops.push({ op: "set", key: f.key, value: draft[f.key] !== void 0 ? !!draft[f.key] : Boolean(value[f.key]) });
             return;
@@ -369,7 +396,7 @@ window.__ModuleLoader__.load({
       }
       function onReset() {
         setBusy(true);
-        Promise.all(FIELDS.map(function (f) { return scope.unset(f.key); })).then(function () {
+        Promise.all(FIELDS.filter(function (f) { return !f.readonly; }).map(function (f) { return scope.unset(f.key); })).then(function () {
           setBusy(false); setNotice(t("saved"));
           setTimeout(function () {
             var fresh = scope.getSnapshot();
@@ -379,6 +406,14 @@ window.__ModuleLoader__.load({
       }
 
       function renderField(f) {
+        // 只读展示字段（如 device_profile）：非可编辑输入框，仅显示运行时填充的摘要。
+        if (f.readonly) {
+          var readonlyVal = String(value[f.key] ?? "");
+          return h("label", { key: f.key, className: "__vt_field" },
+            h("span", { className: "__vt_label" }, t(FIELD_LABELS[f.key])),
+            h("span", { className: "__vt_hint" }, readonlyVal || t("deviceProfileEmpty"))
+          );
+        }
         if (f.type === "boolean") {
           var checked = !!fieldDraft(f);
           return h("label", { key: f.key, className: "__vt_field" },

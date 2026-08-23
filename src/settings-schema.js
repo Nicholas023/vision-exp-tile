@@ -132,6 +132,31 @@ export const SettingsSchema = z.object({
     .boolean()
     .default(true)
     .description('高级：GPU 初始化/推理失败时是否回退 CPU。true=回退（默认）；false=直接报错（调试用）。映射环境变量 DSH_OCR_GPU_FALLBACK'),
+  // ── v0.4.1：慢机测试自适应（可配置超时/设备档位/测试倍率/跳过声明）──────
+  ocr_pool_timeout_ms: z
+    .number()
+    .min(20000)
+    .max(1200000)
+    .default(120000)
+    .description('高级：OCR 池单请求超时（毫秒，20000..1200000）。较差机型可调高避免超时。映射环境变量 DSH_OCR_POOL_TIMEOUT'),
+  performance_tier: z
+    .string()
+    .default('auto')
+    .description('高级：性能档位 auto=自动探测（默认）/ fast / normal / slow（非 auto=用户强制，不应用自动推荐）。映射环境变量 DSH_OCR_PERF_TIER'),
+  test_timeout_factor: z
+    .number()
+    .min(1)
+    .max(4)
+    .default(1)
+    .description('高级：测试超时判定倍率（1..4）。慢机可调大，降低时序抖动导致的偶发失败。映射环境变量 VISION_TEST_TIMEOUT_FACTOR'),
+  test_skip_timing: z
+    .boolean()
+    .default(false)
+    .description('高级：跳过时序敏感断言（用户声明跳过测试）。true=跳过；false=正常执行。映射环境变量 VISION_TEST_SKIP_TIMING'),
+  device_profile: z
+    .string()
+    .default('')
+    .description('只读：运行时设备画像摘要（自动填充，如 "CPU 4核 / 内存 8.0GB / GPU 无 → slow"，不可编辑）'),
   debug: z.boolean().default(false).description('高级：调试日志（写日志，不映射环境变量）'),
 });
 
@@ -174,6 +199,12 @@ export const SETTINGS_FIELDS = [
   { key: 'gpu_python', type: 'text', labelKey: 'gpuPython', advanced: true, envKey: 'DSH_OCR_GPU_PYTHON', configKey: 'gpuPython' },
   { key: 'gpu_device', type: 'text', labelKey: 'gpuDevice', advanced: true, envKey: 'DSH_OCR_GPU_DEVICE', configKey: 'gpuDevice' },
   { key: 'gpu_fallback', type: 'boolean', labelKey: 'gpuFallback', advanced: true, envKey: 'DSH_OCR_GPU_FALLBACK', configKey: 'gpuFallback' },
+  // v0.4.1：慢机测试自适应（device_profile 是只读展示字段：无 configKey/envKey）
+  { key: 'ocr_pool_timeout_ms', type: 'number', labelKey: 'ocrPoolTimeoutMs', advanced: true, configKey: 'ocrPoolTimeoutMs', envKey: 'DSH_OCR_POOL_TIMEOUT' },
+  { key: 'performance_tier', type: 'enum', labelKey: 'performanceTier', advanced: true, options: ['auto', 'fast', 'normal', 'slow'], envKey: 'DSH_OCR_PERF_TIER', configKey: 'performanceTier' },
+  { key: 'test_timeout_factor', type: 'number', labelKey: 'testTimeoutFactor', advanced: true, configKey: 'testTimeoutFactor', envKey: 'VISION_TEST_TIMEOUT_FACTOR' },
+  { key: 'test_skip_timing', type: 'boolean', labelKey: 'testSkipTiming', advanced: true, configKey: 'testSkipTiming', envKey: 'VISION_TEST_SKIP_TIMING' },
+  { key: 'device_profile', type: 'text', labelKey: 'deviceProfile', advanced: true, readonly: true },
   { key: 'debug', type: 'boolean', labelKey: 'debug', advanced: true },
 ];
 

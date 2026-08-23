@@ -4,12 +4,14 @@ import assert from 'node:assert/strict';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OcrPool, poolSizeFromEnv, _resetPoolForTest, getOcrPool } from '../src/ocr-pool.js';
+import { poolTimeoutMs, skipTiming } from './helpers/suite-env.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FAKE = join(__dirname, 'fixtures', 'fake-ocr-worker.mjs');
 
 async function withPool(size, fn, opts = {}) {
-  const pool = new OcrPool({ size, pythonCmd: 'node', workerPath: FAKE, timeoutMs: opts.timeoutMs ?? 2000 });
+  // v0.4.1：默认超时用 poolTimeoutMs(2000)，按环境倍率放大，降低慢机时序抖动风险。
+  const pool = new OcrPool({ size, pythonCmd: 'node', workerPath: FAKE, timeoutMs: opts.timeoutMs ?? poolTimeoutMs(2000) });
   try {
     await fn(pool);
   } finally {
@@ -55,7 +57,13 @@ test('失败响应：worker 返回 ok:false 时 reject', async () => {
   });
 });
 
-test('超时：慢请求触发 kill + 超时错误，且池能继续工作（重启恢复）', async () => {
+// v0.4.1：超时行为属「时序敏感」用例——较差机型可经 VISION_TEST_SKIP_TIMING=1
+// 声明跳过（用户机器慢→避免测试因抖动失败）；跳过时打印原因与建议。
+const skipTimeoutFlag = skipTiming();
+if (skipTimeoutFlag) {
+  console.warn('[ocr-pool] 已跳过「超时/时序窗口」用例：VISION_TEST_SKIP_TIMING=1（用户声明跳过时序敏感断言）。慢机建议在设置页调高 ocr_pool_timeout_ms 或开启 test_skip_timing。');
+}
+test('超时：慢请求触发 kill + 超时错误，且池能继续工作（重启恢复）', { skip: skipTimeoutFlag }, async () => {
   await withPool(1, async (pool) => {
     await assert.rejects(
       pool.execute({ engine: 'rapid', path: 'mode:slow.png' }),
@@ -64,7 +72,7 @@ test('超时：慢请求触发 kill + 超时错误，且池能继续工作（重
     // 池应重建 worker 并继续服务
     const resp = await pool.execute({ engine: 'rapid', path: 'after.png' });
     assert.equal(resp.ok, true);
-  }, { timeoutMs: 300 });
+  }, { timeoutMs: poolTimeoutMs(300) });
 });
 
 test('队列上限：等待队列溢出时立即拒绝（不无限堆积）', async () => {

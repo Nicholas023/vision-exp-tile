@@ -6,11 +6,11 @@
 
 各位随意取用：有问题可以提交 **Issue**（如果能自己改的话就更好了——你提交了 Issue，我也只能给 DeepSeek 看然后让他自己改；我本人尝试过多次，均未学会任何写代码的能力，也是乘上 **AI** 的东风，让我有了开发插件的能力）。
 
-> **本次更新（v0.4.0）完全由 DeepSeek Harness 自主完成**，内容：
-> ① **GPU 多设备加速（可选能力）**：复习考的课件/真题大图想识别得更快，可在设置页「图像识别」分区把本地 OCR 切到 `gpu`——**DirectML 一个引擎覆盖 NVIDIA/AMD/Intel 全厂商**（Windows），CUDA（NVIDIA）/OpenVINO（Intel）可选；`auto` 自动探测、显卡不可用时自动回退 CPU（`gpu_fallback` 可关）；
-> ② **按需开启（不是无脑提速）**：单进程实测 DML 比 CPU 快约 **1.5×**；但插件默认 4 并发进程池模式下 GPU 反而更慢——所以定位为"可选加速能力（默认不启用）"，确有大图要加速时再手动切，**不是"总体提速 X 倍"**；
-> ③ **设置页增强**：新增 `gpu_provider`/`gpu_python`/`gpu_device`/`gpu_fallback` 四个字段 + 引擎下拉新增 Gpu/Auto；默认 rapid 行为不变（向后兼容，无需改配置）；
-> ④ **安装方式不变**：复制/链接插件到插件目录 + 挂 `link:` 依赖即可，同此前各版。
+> **本次更新（v0.4.1）完全由 DeepSeek Harness 自主完成**，内容：
+> ① **慢机测试自适应（解决"较差机型全量测试时 OCR 池超时导致测试不通过"）**：新增设备档位自动识别（CPU 核数/内存/GPU）与「测试前确认 + 慢机放宽超时」机制——较差机型（slow 档）自动放宽 OCR 池单请求超时（120s→240s）、降低池并发（4→2）、关停 GPU，并把测试超时判定倍率 ×2，消除慢机因时序抖动导致的偶发失败；
+> ② **设置项增强**：新增 `ocr_pool_timeout_ms`（OCR 池单请求超时，可调）、`performance_tier`（auto/fast/normal/slow，auto=自动探测）、`test_timeout_factor`（测试超时倍率 1..4）、`test_skip_timing`（跳过时序敏感断言）+ 只读设备画像 `device_profile`；用户显式值 > 档位推荐 > 默认；
+> ③ **安装即优化 + 自检入口**：安装脚本 `install-to-web-profile.ps1` 自动识别设备，slow 档自动把调优键写入 settings.yaml 的 `vision-exp-tile` 分区（仅未显式设置的键，幂等 + 备份 + 可 `-NoDeviceTune` 跳过）；新增 `npm run selfcheck`（`node scripts/self-check.mjs`）——测试前先问是否运行（一般推荐运行），按设备档位注入超时/倍率，慢机仍超时可设置页调高 `ocr_pool_timeout_ms` 或开启 `test_skip_timing` 声明跳过时序断言；
+> ④ **其余**：`client.js`/设置页同步 4 新字段 + 只读画像；OCR 池超时统一由 `DSH_OCR_POOL_TIMEOUT` 控制（`gpuPoolTimeoutMs` 与 pipeline 的写死 120s 一并收敛）；新增 `device.test.js`/`suite-env.test.js`（含慢机注入验证）。
 
 # vision-exp-tile ◆ 为 deepseek-v4-flash-vision-exp 定制的大图智能识图插件
 
@@ -18,7 +18,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org)
-[![version](https://img.shields.io/badge/vision--exp--tile-v0.4.0-orange.svg)](#)
+[![version](https://img.shields.io/badge/vision--exp--tile-v0.4.1-orange.svg)](#)
 [![DSH](https://img.shields.io/badge/DeepSeek%20Harness-plugin-purple.svg)](#)
 
 > 独立 DSH 插件：**零依赖任何第三方 DSH 插件**（picturereader 等均未使用，仅用纯官方 DSH 服务 + 可选开源 OCR 环境）。把大图切成 **800×800 无损小块**（官方缩放规则的"甜蜜点"：块在模型侧**不被降采样**、每块**≤384 token**），携带**坐标标注 + 分块聚合逻辑**直接调用 DeepSeek 视觉 API 完成识别与聚合，返回结构化答案（**不统计 token、不计算费用**）。
@@ -136,6 +136,10 @@ dsh web
 | `groupSize` | 40 | 分层聚合每组的块数 |
 | `mode` / `json` | auto / false | 识别模式 / 输出格式 |
 | `format` / `quality` | png / 90 | 块编码 |
+| `ocrPoolTimeoutMs` | `120000` | OCR 池单请求超时（ms，20000..1200000；慢机可调大） |
+| `performanceTier` | `auto` | 性能档位：auto=自动探测（默认）/fast/normal/slow（非 auto=用户强制，不应用自动推荐） |
+| `testTimeoutFactor` | `1` | 测试超时判定倍率（1..4；慢机可调大，降低时序抖动失败） |
+| `testSkipTiming` | `false` | 是否跳过时序敏感断言（用户声明跳过测试） |
 
 ## 四、成本参考（仅供了解，插件本身不计算）
 
@@ -152,7 +156,9 @@ dsh web
 
 ## 五、验证清单（功能自测）
 
-1. `npm test`：网格/坐标/提示模板/mock API 全部通过；
+> **推荐用 `npm run selfcheck`**（即 `node scripts/self-check.mjs`）：先自动识别设备（CPU/内存/GPU → 档位），再问"是否运行全量测试？"（一般推荐运行，因为要根据实测确认插件可用性），并按设备档位自动注入超时/倍率跑测试。慢机仍超时？在设置页「图像识别→高级」调高 `ocr_pool_timeout_ms`（或设 `performance_tier=slow`），或开启 `test_skip_timing` 声明跳过时序敏感断言（对应环境变量 `VISION_TEST_SKIP_TIMING=1`）。
+
+1. `npm test`：网格/坐标/提示模板/mock API 全部通过（新增 device/suite-env 纯逻辑测试）；
 2. `dsh --profile vision-test --dump-config`：输出树中应出现 `vision-exp-tile` 行；
 3. 启动 `dsh --profile vision-test --port 3081` → 新会话 → 工具列表出现 `vision_tile_split` / `vision_tile_recognize`；
 4. 上传一张 4000×3000 测试图 → 调 `vision_tile_split` → 检查输出目录 20 块 + overview + 坐标清单；

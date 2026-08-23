@@ -1,7 +1,42 @@
 # 更新日志（Release Changelog）
 
-> 全部版本记录（v0.1.0 → v0.4.0），最新在上；本文件 = GitHub Release 的 changelog 栏（由 .github/workflows/release.yml 自动读取）。
+> 全部版本记录（v0.1.0 → v0.4.1），最新在上；本文件 = GitHub Release 的 changelog 栏（由 .github/workflows/release.yml 自动读取）。
 > 注：README 只展示最新一期更新内容（使用者视角）；本文件保留每期完整记录（含历史）。
+
+## v0.4.1（2026-08-23）
+
+**本次更新完全由 DeepSeek Harness 自主完成。**
+
+### 背景与目标
+
+解决"较差机型全量测试时 OCR 池超时导致测试不通过"：慢机（核少/内存小）跑 OCR 池单测时，因时序抖动偶发超时失败。按用户三条建议实现——① 设置项可调超时判定；② 测试前先问用户是否测试；③ 安装时自动识别设备、较差机型特别处理。
+
+### 新功能
+
+1. **设备档案模块**（新增 `src/device.js`）：`probeDevice`（CPU 核数/内存/GPU 名，GPU 用 nvidia-smi 1.5s 超时、失败返回 null，可 mock）、`classifyTier`（slow/normal/fast）、`applyTierRecommendations`（slow 放宽池超时到 240s、池并发降到 2、关 GPU、测试倍率×2；normal/fast 保持默认）、`deviceProfileText`。
+2. **设置项新增 4 字段 + 1 只读**：
+   - `ocr_pool_timeout_ms`（20000..1200000，默认 120000，env `DSH_OCR_POOL_TIMEOUT`）——OCR 池单请求超时，可调；
+   - `performance_tier`（auto/fast/normal/slow，默认 auto，env `DSH_OCR_PERF_TIER`）——auto=自动探测，非 auto=用户强制；
+   - `test_timeout_factor`（1..4，默认 1，env `VISION_TEST_TIMEOUT_FACTOR`）——测试超时判定倍率；
+   - `test_skip_timing`（boolean，默认 false，env `VISION_TEST_SKIP_TIMING`）——跳过时序敏感断言；
+   - `device_profile`（text，只读）——运行时设备画像摘要，自动填充。
+   - 设置/运行时 4 层全链同步（settings-schema / config / runtime / client.js 双语 label），并保持"用户显式值 > 档位推荐 > 默认"。
+3. **慢机测试自适应**：
+   - 新增 `tests/helpers/suite-env.mjs`（`poolTimeoutMs` / `timingFactor` / `skipTiming`）；
+   - `tests/ocr-pool.test.js` 默认超时与超时用例改按倍率放大，时序敏感用例用 `{ skip: skipTiming() }` 声明跳过（跳过时打印原因与建议）；
+   - 新增 `tests/device.test.js`（档位/推荐/注入/auto 应用）与 `tests/suite-env.test.js`（边界：非法回退/clamp/布尔解析），并加入 `package.json` 的 `test` 显式列表。
+4. **交互式自检入口**（新增 `scripts/self-check.mjs`，`npm run selfcheck`）：调 `probeDevice`+档位打印设备画像与推荐；交互询问"是否运行全量测试？（Y/T/N）"（仅 TTY；参数 `--yes`/`--skip-timing`/`--no` 无人值守）；以子进程跑 `node --test`（读 package.json 显式列表），注入 `DSH_OCR_POOL_TIMEOUT`/`VISION_TEST_TIMEOUT_FACTOR`/`VISION_TEST_SKIP_TIMING`，汇总退出码并给出慢机改善建议。
+5. **安装即优化**（`scripts/install-to-web-profile.ps1`）：安装/更新流程末尾自动探测设备（调用 `node scripts/probe-device.mjs`，输出 JSON），slow 档把调优键（`ocr_pool_timeout_ms`/`ocr_pool`/`gpu_provider`/`test_timeout_factor`）写入 `~/.dsh/settings.yaml` 的 `vision-exp-tile` 分区——仅未显式设置的键（幂等）、写入前备份到同目录 `.bak-时间戳`、参数 `-NoDeviceTune` 跳过；无论与否都打印设备画像与推荐。找不到分区则提示不创建（不越权改其他文件）。
+6. **超时收敛**：`ocr-local.js` 的 `gpuPoolTimeoutMs` 改读 `DSH_OCR_POOL_TIMEOUT`（并导出 `ocrPoolTimeoutMs`，兼容旧 `DSH_OCR_GPU_POOL_TIMEOUT`）；`pipeline.js` 两处写死 `120000` 改由 `ocrPoolTimeoutMs()` 提供；`index.js` 注册设置后异步设备探测，完成后重应用 env（auto+slow 无感简化）并回写只读画像。
+
+### 验证
+
+- `npm test`：**128/128** 全绿（原 111 + 新增 device.test.js 13 项 + suite-env.test.js 4 项 + client-bundle 清单补 performance_tier）；
+- `VISION_TEST_TIMEOUT_FACTOR=2 npm test`：128/128 仍全绿（慢机放宽窗口）；
+- `VISION_TEST_SKIP_TIMING=1 npm test`：127 通过 + 1 跳过（超时/时序敏感用例），0 失败；
+- `node scripts/self-check.mjs --yes`：设备画像（本机 16 核/15.6GB/RTX 3050 Ti → normal）→ 注入 120000/×1 → 128/128 通过；
+- `node scripts/probe-device.mjs`：输出合法 JSON；
+- `install-to-web-profile.ps1` 的 slow 合并逻辑经临时 settings.yaml 验证：首次写入 4 调优键、已有键不覆盖、二次幂等、备份生成。
 
 ## v0.4.0（2026-08-23）
 

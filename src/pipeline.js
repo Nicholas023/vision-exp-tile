@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { cropRegion, normalizeRect } from './tile-engine.js';
-import { ocrText } from './ocr-local.js';
+import { ocrText, ocrPoolTimeoutMs } from './ocr-local.js';
 import { detectHandwrite } from './handwrite.js';
 import { previewImage, recognizeRegion } from './vision-client.js';
 import { buildPixelGrid } from './pixelgrid.js';
@@ -212,7 +212,7 @@ export async function runPipeline(opts) {
         } catch (hwErr) {
           // 手写 API 失败 → 回退本地 OCR（降级不中断）
           try {
-            ocrResult = await ocrFn(cropped.buffer, { engine: ocrEngine, timeoutMs: 120000, preprocess: preprocessMode });
+            ocrResult = await ocrFn(cropped.buffer, { engine: ocrEngine, timeoutMs: ocrPoolTimeoutMs(), preprocess: preprocessMode });
             ocrResult = { ...ocrResult, degraded: true, note: `手写 API 失败回退本地：${String(hwErr.message || hwErr).slice(0, 120)}` };
           } catch {
             ocrResult = { engine: 'unavailable', text: '', lines: [], degraded: true, reason: String(hwErr.message || hwErr).slice(0, 160) };
@@ -222,7 +222,7 @@ export async function runPipeline(opts) {
         // —— 分支 B：非手写/无判别 → 高效本地 OCR（normal 区 preprocess 关闭放大）——
         const preModeNormal = preprocessMode === 'off' ? 'off' : 'auto-enlarge-off';
         try {
-          ocrResult = await ocrFn(cropped.buffer, { engine: ocrEngine, timeoutMs: 120000, preprocess: preModeNormal });
+          ocrResult = await ocrFn(cropped.buffer, { engine: ocrEngine, timeoutMs: ocrPoolTimeoutMs(), preprocess: preModeNormal });
           if (isHandwrite === false) ocrResult = { ...ocrResult, isHandwrite: false, hwSource };
         } catch (error) {
           try {

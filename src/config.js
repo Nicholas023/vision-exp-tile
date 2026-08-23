@@ -37,6 +37,10 @@ export const NS = 'vision-exp-tile';
  * - withOverview 是否同时生成并落盘 overview 缩略图（网格+块号，辅助全局布局）。
  * - outDir      块输出目录；空字符串表示「原图同目录下 <原名>_tiles 子目录」。
  * - rotate      识别前顺时针旋转角度（0/90/180/270）；默认 0。
+ * - ocrPoolTimeoutMs OCR 池单请求超时（毫秒，20000..1200000）；默认 120s。
+ * - performanceTier 性能档位（auto/fast/normal/slow）；默认 auto=自动探测。
+ * - testTimeoutFactor 测试超时判定倍率（1..4）；默认 1。
+ * - testSkipTiming 是否跳过时序敏感断言（默认 false）。
  */
 export const DEFAULT_CONFIG = Object.freeze({
   apiKeyEnv: 'DEEPSEEK_API_KEY',
@@ -54,7 +58,12 @@ export const DEFAULT_CONFIG = Object.freeze({
   json: false,
   withOverview: true,
   outDir: '',
-  rotate: 0
+  rotate: 0,
+  // v0.4.1：慢机测试自适应
+  ocrPoolTimeoutMs: 120000,
+  performanceTier: 'auto',
+  testTimeoutFactor: 1,
+  testSkipTiming: false
 });
 
 /* ------------------------------------------------------------------ */
@@ -191,6 +200,12 @@ export function normalizeConfig(raw) {
   }
   const rotate = rotateRaw;
 
+  // 8. v0.4.1：慢机测试自适应字段（OCR 池超时/性能档位/测试倍率/跳过声明）。
+  const ocrPoolTimeoutMs = readInt(src.ocrPoolTimeoutMs, DEFAULT_CONFIG.ocrPoolTimeoutMs, 20000, 1200000, 'ocrPoolTimeoutMs');
+  const performanceTier = readEnum(src.performanceTier, DEFAULT_CONFIG.performanceTier, ['auto', 'fast', 'normal', 'slow'], 'performanceTier');
+  const testTimeoutFactor = readInt(src.testTimeoutFactor, DEFAULT_CONFIG.testTimeoutFactor, 1, 4, 'testTimeoutFactor');
+  const testSkipTiming = boolVal(src.testSkipTiming, DEFAULT_CONFIG.testSkipTiming);
+
   return {
     apiKeyEnv,
     baseURL,
@@ -207,6 +222,10 @@ export function normalizeConfig(raw) {
     json,
     withOverview,
     outDir,
-    rotate
+    rotate,
+    ocrPoolTimeoutMs,
+    performanceTier,
+    testTimeoutFactor,
+    testSkipTiming
   };
 }

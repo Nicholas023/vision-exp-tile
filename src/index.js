@@ -30,6 +30,7 @@ import { settingsNamespace } from '@deepseek-ai/dsh-settings';
 import z from '@deepseek-ai/schemastery';
 import { SettingsSchema, toSettingsBase } from './settings-schema.js';
 import { setRuntimeSource, getRuntimeConfig, applySettingsEnv, normalizeFromSettings } from './runtime.js';
+import { probeDevice, deviceProfileText } from './device.js';
 
 /** 插件名（供 DSH 加载器识别）。 */
 export const name = 'vision-exp-tile';
@@ -999,6 +1000,21 @@ export function apply(ctx, configRaw) {
       sourceGetter = () => normalizeFromSettings(scope.get());
       // 首次应用一次设置页的环境变量映射（OCR 引擎/池等）。
       applySettingsEnv(scope.get());
+      // v0.4.1：异步设备探测完成后，按 auto 档位重新应用 env（若为 slow 会写入
+      //   放宽超时/降并发/关 GPU 的推荐值），并回写只读设备画像（device_profile）。
+      //   注意：探测含 GPU spawn（≤1.5s），故 fire-and-forget，不阻塞插件启动。
+      probeDevice().then((probe) => {
+        try {
+          applySettingsEnv(scope.get());
+          const text = deviceProfileText(probe);
+          // 仅在差异时回写，避免每次启动都覆盖 settings.yaml（幂等）。
+          if (typeof scope.set === 'function' && String(scope.get().device_profile ?? '') !== text) {
+            scope.set('device_profile', text);
+          }
+        } catch (error) {
+          ctx.logger?.warn?.(`[vision-exp-tile] 应用设备档位 env 失败：${String(error)}`);
+        }
+      });
       // 订阅变化：设置更新时重新应用 env（进程池参数在下次工具调用生效）。
       scope.watch(() => {
         try {

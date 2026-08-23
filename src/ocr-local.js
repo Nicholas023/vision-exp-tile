@@ -109,7 +109,7 @@ function ocrPool(engineUsed) {
     else if (engineUsed === 'gpu') py = gpuPython();
     else py = rapidPython();
     if (!py) return null; // venv 缺失 → 上层走单进程兜底
-    return getOcrPool(py, undefined, undefined, gpuPoolTimeoutMs());
+    return getOcrPool(py, undefined, undefined, ocrPoolTimeoutMs());
   } catch {
     return null;
   }
@@ -167,11 +167,23 @@ export function setGpuRuntimeFailed(v = true) { gpuRuntimeFailed = v; }
 let _engineAvailableOverride = null;
 export function _setEngineAvailableOverride(fn) { _engineAvailableOverride = typeof fn === 'function' ? fn : null; }
 
-/** v0.4.0：GPU 池超时（毫秒），可配置（DSH_OCR_GPU_POOL_TIMEOUT），默认 120s（覆盖 30s 冷启动）。 */
-function gpuPoolTimeoutMs() {
-  const raw = Number(process.env.DSH_OCR_GPU_POOL_TIMEOUT);
-  return (Number.isFinite(raw) && raw > 0) ? raw : 120_000;
+/**
+ * OCR 池单请求超时（毫秒）。
+ * v0.4.1：由设置项 ocr_pool_timeout_ms → 环境变量 DSH_OCR_POOL_TIMEOUT 配置，默认 120s；
+ * 兼容 v0.4.0 的旧变量 DSH_OCR_GPU_POOL_TIMEOUT（作为回退，避免老配置失效）。
+ * 说明：该值同时作为「非池单进程兜底」与 pipeline 传给 ocrFn 的超时默认来源，
+ * 以支持较差机型在设置页/安装脚本放宽超时，避免 OCR 池偶发超时判死。
+ */
+export function ocrPoolTimeoutMs() {
+  const raw = Number(process.env.DSH_OCR_POOL_TIMEOUT);
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  const legacy = Number(process.env.DSH_OCR_GPU_POOL_TIMEOUT);
+  if (Number.isFinite(legacy) && legacy > 0) return legacy;
+  return 120_000;
 }
+
+/** v0.4.0 旧内部名：沿用同一逻辑（别名保留，避免改动调用处；v0.4.1 已并入统一设置项）。 */
+function gpuPoolTimeoutMs() { return ocrPoolTimeoutMs(); }
 
 /**
  * v0.4.0：纯函数——按 DSH_OCR_GPU_PROVIDER 与 onnxruntime 实际可用 provider 列表解析最终 EP。

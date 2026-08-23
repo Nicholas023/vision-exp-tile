@@ -21,11 +21,17 @@
  * （base_url→baseURL 等，见 settings-schema.js 的 SETTINGS_FIELDS.configKey），
  * 再交给 normalizeConfig 统一校验归一化；config.js 保持纯函数不被修改。
  *
+ * v0.4.1：新增慢机测试自适应字段（ocr_pool_timeout_ms / performance_tier /
+ * test_timeout_factor / test_skip_timing / device_profile）。envFromSettings 在
+ * performance_tier=auto 时按设备档位（device.js 的缓存探测）对「未显式设置」的
+ * OCR 池超时/池大小/GPU 关停应用推荐值；用户显式值 > tier 推荐 > 默认。
+ *
  * @module vision-exp-tile/runtime
  */
 
 import { normalizeConfig } from './config.js';
 import { SETTINGS_FIELDS } from './settings-schema.js';
+import { getCachedProbe, classifyTier, applyTierRecommendations, DEFAULT_RECOMMENDATIONS } from './device.js';
 
 /* ------------------------------------------------------------------ */
 /* 内部状态                                                             */
@@ -49,7 +55,12 @@ const SETTINGS_ENV_KEYS = [
   'DSH_OCR_GPU_PROVIDER',
   'DSH_OCR_GPU_PYTHON',
   'DSH_OCR_GPU_DEVICE',
-  'DSH_OCR_GPU_FALLBACK'
+  'DSH_OCR_GPU_FALLBACK',
+  // v0.4.1：慢机测试自适应相关
+  'DSH_OCR_POOL_TIMEOUT',
+  'DSH_OCR_PERF_TIER',
+  'VISION_TEST_TIMEOUT_FACTOR',
+  'VISION_TEST_SKIP_TIMING'
 ];
 
 /**
@@ -127,6 +138,25 @@ export function _resetRuntimeForTest(env = process.env) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * 解析「当前生效的性能档位」（同步、无副作用）。
+ *
+ * 规则：
+ *  - 用户显式设了 performance_tier（fast/normal/slow）→ 直接用该档位（强制档位不应用自动推荐）；
+ *  - performance_tier 为 auto（默认/未设置）→ 用 device.js 的进程级缓存探测结果判定；
+ *    尚无缓存（探测尚未运行/失败）时保守返回 'normal'，避免把设备误判为 slow 而错误放宽超时。
+ *
+ * @param {object} [raw] - 设置快照（snake_case）。
+ * @returns {'fast'|'normal'|'slow'} 生效档位。
+ */
+function effectiveTier(raw) {
+  const v = raw && typeof raw === 'object' ? raw : {};
+  const perf = String(v.performance_tier ?? 'auto').trim().toLowerCase();
+  if (perf !== 'auto' && ['fast', 'normal', 'slow'].includes(perf)) return perf;
+  const probe = getCachedProbe();
+  return probe ? classifyTier(probe) : 'normal';
+}
+
+/**
  * 把设置快照映射成「应写入 process.env 的 DSH_* 键值对」。
  *
  * 仅映射那些在设置页中有明确含义、且能直接落 env 的键：
@@ -134,12 +164,23 @@ export function _resetRuntimeForTest(env = process.env) {
  *  - 数值：交叠出界/非整数则忽略（模块自行回退）。
  *  - 布尔：true=不设置（模块默认开）；false=显式 "0" 关闭。
  *
+ * v0.4.1：performance_tier=auto 时按设备档位对「未显式设置」的 OCR 池超时/池大小/
+ * GPU 关停应用 slow 推荐（用户显式值 > tier 推荐 > 默认）。
+ *
  * @param {object} [raw] - 设置快照（snake_case，scope.get() 的解析值）。
  * @returns {Record<string,string>} env 键值对（不写入 process.env，纯计算）。
  */
 export function envFromSettings(raw) {
   const v = raw && typeof raw === 'object' ? raw : {};
   const out = {};
+
+  // v0.4.1：解析性能档位与推荐覆盖。
+  //   - 用户显式 performance_tier（fast/normal/slow）→ 直接用该档位；
+  //   - auto（默认）→ 用 device.js 的缓存探测结果判定；尚无缓存（探测未跑）时
+  //     保守按 normal（不臆测慢机，避免探测失败被误判）。
+  // 用户显式值 > tier 推荐 > 默认（见下述各字段的写入顺序）。
+  const tier = effectiveTier(v);
+  const rec = applyTierRecommendations(tier);
 
   // DSH_OCR_ENGINE：auto/空=不设置（模块自动降级）。
   const engine = String(v.ocr_engine ?? 'auto').trim();
@@ -157,9 +198,13 @@ export function envFromSettings(raw) {
   const ic = Number(v.interest_concurrency);
   if (Number.isInteger(ic) && ic >= 1 && ic <= 4) out.DSH_INTEREST_CONCURRENCY = String(ic);
 
-  // DSH_OCR_POOL（0..8）。
+  // DSH_OCR_POOL（0..8）：ocr_pool_pool 显式值 > slow 档推荐（降为 2，更省资源防盗崩）> 不设置（默认 4）。
   const pool = Number(v.ocr_pool);
-  if (Number.isInteger(pool) && pool >= 0 && pool <= 8) out.DSH_OCR_POOL = String(pool);
+  if (Number.isInteger(pool) && pool >= 0 && pool <= 8) {
+    out.DSH_OCR_POOL = String(pool);
+  } else if (rec.ocrPool !== undefined && rec.ocrPool !== DEFAULT_RECOMMENDATIONS.ocrPool) {
+    out.DSH_OCR_POOL = String(rec.ocrPool);
+  }
 
   // DSH_OCR_CACHE：true=不设置（默认开）；false="0"。
   if (v.ocr_cache === false) out.DSH_OCR_CACHE = '0';
@@ -169,8 +214,13 @@ export function envFromSettings(raw) {
 
   // v0.4.0：GPU 加速。auto/空/true 默认不设置（交模块自动探测/默认），非默认才显式写。
   // provider：auto=不设置（自动探测）；cuda/dml/openvino/off 显式写。
+  // v0.4.1：slow 档未显式设置时推荐 off（慢机关 GPU，避免拖慢/不稳定）。
   const gp = String(v.gpu_provider ?? 'auto').trim();
-  if (gp !== '' && gp !== 'auto') out.DSH_OCR_GPU_PROVIDER = gp;
+  if (gp !== '' && gp !== 'auto') {
+    out.DSH_OCR_GPU_PROVIDER = gp;
+  } else if (rec.gpuProvider !== undefined && rec.gpuProvider !== DEFAULT_RECOMMENDATIONS.gpuProvider) {
+    out.DSH_OCR_GPU_PROVIDER = String(rec.gpuProvider);
+  }
   // python 路径：非空即写。
   const gpy = String(v.gpu_python ?? '').trim();
   if (gpy !== '') out.DSH_OCR_GPU_PYTHON = gpy;
@@ -179,6 +229,30 @@ export function envFromSettings(raw) {
   if (gdev !== '' && gdev !== 'auto') out.DSH_OCR_GPU_DEVICE = gdev;
   // fallback：true=不设置（默认开）；false="0"。
   if (v.gpu_fallback === false) out.DSH_OCR_GPU_FALLBACK = '0';
+
+  // ── v0.4.1：慢机测试自适应字段的 env 映射 ─────────────────────────────
+  // DSH_OCR_POOL_TIMEOUT：ocr_pool_timeout_ms 显式值 > slow 档推荐（240000）> 不设置（模块默认 120s）。
+  const timeoutRaw = Number(v.ocr_pool_timeout_ms);
+  if (Number.isInteger(timeoutRaw) && timeoutRaw >= 20000 && timeoutRaw <= 1200000) {
+    out.DSH_OCR_POOL_TIMEOUT = String(timeoutRaw);
+  } else if (rec.ocrPoolTimeoutMs !== undefined && rec.ocrPoolTimeoutMs !== DEFAULT_RECOMMENDATIONS.ocrPoolTimeoutMs) {
+    out.DSH_OCR_POOL_TIMEOUT = String(rec.ocrPoolTimeoutMs);
+  }
+
+  // DSH_OCR_PERF_TIER：性能档位（auto/空=不设置，交给模块自动探测）。
+  const perf = String(v.performance_tier ?? 'auto').trim();
+  if (perf !== '' && perf !== 'auto') out.DSH_OCR_PERF_TIER = perf;
+
+  // VISION_TEST_TIMEOUT_FACTOR：test_timeout_factor 显式值 > slow 档推荐（2）> 不设置（测试默认 1）。
+  const ttf = Number(v.test_timeout_factor);
+  if (Number.isInteger(ttf) && ttf >= 1 && ttf <= 4) {
+    out.VISION_TEST_TIMEOUT_FACTOR = String(ttf);
+  } else if (rec.testTimeoutFactor !== undefined && rec.testTimeoutFactor !== DEFAULT_RECOMMENDATIONS.testTimeoutFactor) {
+    out.VISION_TEST_TIMEOUT_FACTOR = String(rec.testTimeoutFactor);
+  }
+
+  // VISION_TEST_SKIP_TIMING：true=写入 "1"（跳过时序敏感断言）；false=不设置。
+  if (v.test_skip_timing === true) out.VISION_TEST_SKIP_TIMING = '1';
 
   return out;
 }
