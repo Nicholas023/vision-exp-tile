@@ -6,15 +6,11 @@
 
 各位随意取用：有问题可以提交 **Issue**（如果能自己改的话就更好了——你提交了 Issue，我也只能给 DeepSeek 看然后让他自己改；我本人尝试过多次，均未学会任何写代码的能力，也是乘上 **AI** 的东风，让我有了开发插件的能力）。
 
-> **本次更新（v0.4.1）完全由 DeepSeek Harness 自主完成**，内容：
-> ① **慢机测试自适应（解决"较差机型全量测试时 OCR 池超时导致测试不通过"）**：新增设备档位自动识别（CPU 核数/内存/GPU）与「测试前确认 + 慢机放宽超时」机制——较差机型（slow 档）自动放宽 OCR 池单请求超时（120s→240s）、降低池并发（4→2）、关停 GPU，并把测试超时判定倍率 ×4（性能较好机器用 ×2 不足以体现慢机差异；×4 给慢机留足余量，可手动到最保守的 ×8），消除慢机因时序抖动导致的偶发失败；
-> ② **设置项增强**：新增 `ocr_pool_timeout_ms`（OCR 池单请求超时，可调）、`performance_tier`（auto/fast/normal/slow，auto=自动探测）、`test_timeout_factor`（测试超时倍率 1..8，推荐 4=slow 档默认，手动最保守 8）、`test_skip_timing`（跳过时序敏感断言）+ 只读设备画像 `device_profile`；用户显式值 > 档位推荐 > 默认；
-> ③ **安装即优化 + 自检入口**：安装脚本 `install-to-web-profile.ps1` 自动识别设备，slow 档自动把调优键写入 settings.yaml 的 `vision-exp-tile` 分区（仅未显式设置的键，幂等 + 备份 + 可 `-NoDeviceTune` 跳过）；新增 `npm run selfcheck`（`node scripts/self-check.mjs`）——测试前先问是否运行（一般推荐运行），按设备档位注入超时/倍率，慢机仍超时可设置页调高 `ocr_pool_timeout_ms` 或开启 `test_skip_timing` 声明跳过时序断言；
-> ④ **其余**：`client.js`/设置页同步 4 新字段 + 只读画像；OCR 池超时统一由 `DSH_OCR_POOL_TIMEOUT` 控制（`gpuPoolTimeoutMs` 与 pipeline 的写死 120s 一并收敛）；新增 `device.test.js`/`suite-env.test.js`（含慢机注入验证）。
-> ⑤ **设备微基准算力评级（A）**：新增纯 JS 轻量基准（约 0.4s，归一化 0..2、1.0=参考机）修正档位——只按核数不准（小核/降频/云主机/VM 配额）；基准 <0.5 不判 fast、<0.3 且无 GPU 判 slow。设置项 `device_benchmark` 可关。
-> ⑥ **电池/低功耗探测（B）**：检测是否电池放电；放电中且档位 fast/normal 自动应用省电推荐（OCR 池并发降到 2、测试倍率×2、不自动开 GPU；slow 推荐不变）。设置项 `device_power_probe` 可关。
-> ⑦ **ARM/WSL/容器降级（C）**：检测 arch/WSL/容器；这些受限环境自动用保守默认（块格式 jpeg、OCR 池并发 2、不自动开 GPU）。设置项 `platform_fallback`=auto/on/off。
-> ⑧ **慢网适配（D）**：slow 档自动把兴趣点并发降到 1、视觉 API 单请求超时放大到 600s（默认 300s×2）。设置项 `slow_net_adapt` 可关。
+> **本次更新（v0.4.2）完全由 DeepSeek Harness 自主完成**，内容：
+> ① **与 picturereader 共存分工引导**：探测 picturereader 是否在场（注册表工具 `image_scan` / 插件目录双通道），在场时给本插件三个工具（`vision_tile_split` / `vision_tile_recognize` / `vision_region_crop`）的末尾追加一句分工引导——大图切块/批量/区域识别用本插件，小图/像素级/整页文档用 picturereader 的 `image_scan`/`image_ocr`/`image_batch`/`document_to_image`；省模型空转轮数。不在场则工具描述与以前逐字节一致（零回归）。
+> ② **视觉端点复用**：picturereader 已在 settings.yaml 配好的 `vlm_base`/`vlm_model`，当本插件 baseURL/model 未显式设置时直接复用（免重复配置；用户显式 > peer > 默认）。
+> ③ **OCR venv 共享**：本插件默认 venv 缺失时，复用 picturereader 已建好的 `paddle_venv`/`rapid_venv`（同目录 `$HOME/<venv>`，失败安全回退）。
+> ④ **其余**：新增 `tests/peer.test.js`（共存探测/分工/peer 配置读取/venv 优先级）；无新 npm 依赖，不改动 picturereader 任何文件。
 
 # vision-exp-tile ◆ 为 deepseek-v4-flash-vision-exp 定制的大图智能识图插件
 
@@ -22,7 +18,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org)
-[![version](https://img.shields.io/badge/vision--exp--tile-v0.4.1-orange.svg)](#)
+[![version](https://img.shields.io/badge/vision--exp--tile-v0.4.2-orange.svg)](#)
 [![DSH](https://img.shields.io/badge/DeepSeek%20Harness-plugin-purple.svg)](#)
 
 > 独立 DSH 插件：**零依赖任何第三方 DSH 插件**（picturereader 等均未使用，仅用纯官方 DSH 服务 + 可选开源 OCR 环境）。把大图切成 **800×800 无损小块**（官方缩放规则的"甜蜜点"：块在模型侧**不被降采样**、每块**≤384 token**），携带**坐标标注 + 分块聚合逻辑**直接调用 DeepSeek 视觉 API 完成识别与聚合，返回结构化答案（**不统计 token、不计算费用**）。
@@ -213,6 +209,7 @@ dsh web
 | 切块 / 预检 / 兴趣点识别 / 像素网格 | 插件自带（**pixelgrid 自实现，不依赖任何其它插件**） | ✅ 始终可用 |
 | pipeline 本地 OCR | 探测本机 **paddle_venv / rapid_venv**（`$HOME` 下，路径可用 `DSH_PADDLE_PYTHON`/`DSH_RAPID_PYTHON` 覆盖）→ 无则用 **Windows OCR**（WinRT，零依赖） | ✅ 自动降级；仍无 OCR（如 Linux 未装 venv）→ **自动转交视觉 API 转录该区域**，pipeline 不中断 |
 | smart 模式文字识别 | 本插件自带（`vision_region_crop` 视觉直读转录） | ✅ 始终可用，零依赖第三方插件 |
+| **与 picturereader 共存** | 探测其是否在场（注册表工具 `image_scan` / 插件目录双通道） | ✅ 在场时给本插件工具追加分工引导（大图→本插件，小图/文档→picturereader）；复用其已配视觉端点（`vlm_base`/`vlm_model`）与已建 OCR venv（`paddle_venv`/`rapid_venv`）；不在场则行为与无此插件时完全一致，且不改动 picturereader 任何文件 |
 
 **结论**：本插件**零依赖任何第三方 DSH 插件**（picturereader 等均未使用）；paddle/rapid 是用户可选安装的开源 OCR 环境（Apache-2.0，仅环境探测，非插件依赖），装了中文转录质量最好，不装也完全可用。
 

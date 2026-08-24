@@ -1,8 +1,32 @@
 # 更新日志（Release Changelog）
 
-> 全部版本记录（v0.1.0 → v0.4.1），最新在上；本文件 = GitHub Release 的 changelog 栏（由 .github/workflows/release.yml 自动读取）。
+> 全部版本记录（v0.1.0 → v0.4.2），最新在上；本文件 = GitHub Release 的 changelog 栏（由 .github/workflows/release.yml 自动读取）。
 > 注：README 只展示最新一期更新内容（使用者视角）；本文件保留每期完整记录（含历史）。
 
+## v0.4.2（2026-08-24）
+
+**本次更新完全由 DeepSeek Harness 自主完成。**
+
+### 背景与目标
+
+vision-exp-tile 与上游 picturereader（github.com/jing-hy/picturereader）常同挂载于同一 DSH 实例。二者都做图像识别，若不分工会让模型被两套近似工具搞晕、多空转轮数。本版做"picturereader 适应性优化"：两插件共存/协作的工具调度适配，并复用其已配视觉端点与已建 OCR venv，顺带省模型空转。
+
+### 新功能
+
+1. **共存探测 + 工具分工引导（A）**：新增 `src/picturereader-detector.js`——`isPicturereaderPresent`（双通道：dsh-tools 注册表 `ctx.tools.get('image_scan')` / 插件目录 `<DSH_HOME>/plugins/picturereader` 存在性；全部 try/catch，异常=不在场）、`collabGuideText`（在场返回 ≤220 字中文分工引导）、`withCollabIfPresent`。`src/index.js` 注册三个工具时按探测结果在 description 末尾追加分工段（大图切块/批量/区域→本插件；小图/像素级/整页文档→picturereader 的 `image_scan`/`image_ocr`/`image_batch`/`document_to_image`）；首个 apply 探测 + setTimeout 500/1500ms 复查（防插件注册顺序竞态，结果变化才 dispose+重注册一次）。**picturereader 不在场时工具描述与 v0.4.1 逐字节一致（零回归）；不在工具结果尾部加任何文本。**
+2. **peer 配置复用（B）**：新增 `src/peer-config.js`——`readPeerSettings` 读 settings.yaml 的 `picturereader:` 分区（文本行匹配，去引号/去注释；文件/分区缺失=null）；`applyPeerDefaults` 在本插件 baseURL/model 等于默认（未显式）时以 `vlm_base`/`vlm_model` 覆盖（用户显式 > peer > 默认）；apiKeyEnv 仍用本插件自身 `DEEPSEEK_API_KEY` 链（不读 vlm_key 密钥）。
+3. **peer venv 复用（C）**：`src/ocr-local.js` 的 `rapidPython`/`paddlePython` 增加 peer venv 候选——优先级：本插件显式 env（`DSH_RAPID_PYTHON`/`DSH_PADDLE_PYTHON`）> 本插件默认 venv（存在）> picturereader 已建 venv（`$HOME/<venv>/Scripts/python.exe`）> 本插件默认（兜底失败安全回退）；`resolveVenvPython` 为纯函数（可注入 exists 便于单测）。venv 路径常量经实证：picturereader/src/core.js 用 `join(homedir(),'<venv>','Scripts','python.exe')`。
+4. **测试**：新增 `tests/peer.test.js`（16 项）：探测双通道/异常、分工引导在场/不在场、三个真实工具描述回归（不在场不含分工段）、peer 配置读取（临时 YAML：正常/缺键/畸形/无分区）、applyPeerDefaults 优先级、resolveVenvPython 优先级、rapid/paddle venv 集成（临时目录 mock 路径存在性）。
+5. **无新增依赖、不改动 picturereader**：全部用 Node 内置 + 现有依赖；不写 picturereader 任何文件。
+
+### 验证
+
+- `npm test`：**163/163** 全绿（原 147 + peer.test.js 16 项）；
+- `VISION_TEST_TIMEOUT_FACTOR=8 npm test`：163/163 仍全绿；
+- `VISION_TEST_SKIP_TIMING=1 npm test`：162 通过 + 1 跳过（超时/时序敏感用例），0 失败；
+- `node scripts/probe-device.mjs`：输出合法 JSON（不受本版影响）。
+
+---
 ## v0.4.1（2026-08-23）
 
 **本次更新完全由 DeepSeek Harness 自主完成。**

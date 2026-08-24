@@ -31,6 +31,8 @@ import z from '@deepseek-ai/schemastery';
 import { SettingsSchema, toSettingsBase } from './settings-schema.js';
 import { setRuntimeSource, getRuntimeConfig, applySettingsEnv, normalizeFromSettings } from './runtime.js';
 import { probeDevice, deviceProfileText } from './device.js';
+import { isPicturereaderPresent, withCollabIfPresent } from './picturereader-detector.js';
+import { readPeerSettings, applyPeerDefaults } from './peer-config.js';
 
 /** 插件名（供 DSH 加载器识别）。 */
 export const name = 'vision-exp-tile';
@@ -947,6 +949,23 @@ export function createRegionCropTool(ctx, cfg) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * 注册本插件三个工具的工具集（v0.4.2）。
+ * 每个工具注册前用 withCollabIfPresent 按当前探测结果（picturereader 是否在场）追加分工引导段；
+ * 不在场则 description 与基线逐字节一致（回归红线）。
+ * @param {object} ctx - Cordis 上下文（提供 ctx.tools.register）。
+ * @param {object} liveCfg - 实时配置 Proxy。
+ * @param {boolean} present - picturereader 是否在场。
+ * @returns {Array<() => void>} 各工具注册返回的 disposer。
+ */
+function registerToolset(ctx, liveCfg, present) {
+  return [
+    ctx.tools.register(withCollabIfPresent(createSplitTool(ctx, liveCfg), present)),
+    ctx.tools.register(withCollabIfPresent(createRecognizeTool(ctx, liveCfg), present)),
+    ctx.tools.register(withCollabIfPresent(createRegionCropTool(ctx, liveCfg), present))
+  ];
+}
+
+/**
  * DSH 插件入口：注册 vision_tile_split / vision_tile_recognize / vision_region_crop 三个工具。
  *
  * v0.3.0 设置说明：
@@ -962,6 +981,10 @@ export function createRegionCropTool(ctx, cfg) {
 export function apply(ctx, configRaw) {
   // configRaw 可为 undefined，normalizeConfig 负责合并默认并校验。
   const cfg = normalizeConfig(configRaw);
+  // B. peer 配置复用（v0.4.2）：picturereader 已配视觉端点/模型则免重复配置——
+  //    applyPeerDefaults 仅在 baseURL/model 等于默认（未显式）时以 peer 值覆盖；用户显式 > peer > 默认。
+  const peer = readPeerSettings();
+  applyPeerDefaults(cfg, peer);
 
   // ── 运行时快照：工具执行时惰性读最新设置；
   //    sourceGetter 为 null（无 settings 服务或尚未注册）时回退到初始 cfg。──
@@ -979,10 +1002,30 @@ export function apply(ctx, configRaw) {
     }
   });
 
+  // ── v0.4.2：picturereader 共存分工引导 ──
+  // 注册时按当前探测结果拼装分工段；延迟 500/1500ms 复查（防插件注册顺序竞态），
+  // 若结果变化且尚无二次注册 → 解除后再 register 一次（仅前 2s 内"裸重注册"，不干扰正常使用）。
   ctx.effect(() => {
-    ctx.tools.register(createSplitTool(ctx, liveCfg));
-    ctx.tools.register(createRecognizeTool(ctx, liveCfg));
-    ctx.tools.register(createRegionCropTool(ctx, liveCfg));
+    let present = isPicturereaderPresent({ toolsApi: ctx.tools });
+    let registered = registerToolset(ctx, liveCfg, present);
+    let rechecked = false;
+    const recheck = () => {
+      if (rechecked) return;
+      rechecked = true;
+      const p2 = isPicturereaderPresent({ toolsApi: ctx.tools });
+      if (p2 !== present) {
+        present = p2;
+        for (const d of registered) { try { d(); } catch { /* 忽略 */ } }
+        registered = registerToolset(ctx, liveCfg, present);
+      }
+    };
+    const t1 = setTimeout(recheck, 500);
+    const t2 = setTimeout(recheck, 1500);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      for (const d of registered) { try { d(); } catch { /* 忽略 */ } }
+    };
   });
 
   // ── v0.3.0：注册「图像识别」设置命名空间 + 订阅热更 ──
@@ -997,7 +1040,7 @@ export function apply(ctx, configRaw) {
         { base: toSettingsBase(configRaw) }
       );
       // 读取时实时归一化（scope.get() 已含 schema默认 + configRaw base + 用户设置）。
-      sourceGetter = () => normalizeFromSettings(scope.get());
+      sourceGetter = () => applyPeerDefaults(normalizeFromSettings(scope.get()), peer);
       // 首次应用一次设置页的环境变量映射（OCR 引擎/池等）。
       applySettingsEnv(scope.get());
       // v0.4.1 扩展：异步设备探测完成后，按 auto 档位重新应用 env（slow/省电/平台降级/
