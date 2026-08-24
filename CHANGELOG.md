@@ -26,6 +26,10 @@ vision-exp-tile 与上游 picturereader（github.com/jing-hy/picturereader）常
 - `VISION_TEST_SKIP_TIMING=1 npm test`：162 通过 + 1 跳过（超时/时序敏感用例），0 失败；
 - `node scripts/probe-device.mjs`：输出合法 JSON（不受本版影响）。
 
+### 致谢与兼容性说明
+
+本版与 [picturereader](https://github.com/jing-hy/picturereader)（MIT，作者 @jing-hy）做了共存协作适配——感谢上游作者与社区。两个插件都装时，模型会自动按分工选工具（大图/批量走 vision-exp-tile，小图/像素级/整页文档走 picturereader）；视觉端点与 OCR 环境可共享复用。**不安装 picturereader 也完全不影响使用：本插件保持完全独立，所有协作探测失败自动回退，双方互不修改。**
+
 ---
 ## v0.4.1（2026-08-23）
 

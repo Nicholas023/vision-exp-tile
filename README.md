@@ -11,6 +11,7 @@
 > ② **视觉端点复用**：picturereader 已在 settings.yaml 配好的 `vlm_base`/`vlm_model`，当本插件 baseURL/model 未显式设置时直接复用（免重复配置；用户显式 > peer > 默认）。
 > ③ **OCR venv 共享**：本插件默认 venv 缺失时，复用 picturereader 已建好的 `paddle_venv`/`rapid_venv`（同目录 `$HOME/<venv>`，失败安全回退）。
 > ④ **其余**：新增 `tests/peer.test.js`（共存探测/分工/peer 配置读取/venv 优先级）；无新 npm 依赖，不改动 picturereader 任何文件。
+> ⑤ **致谢与边界声明**：本版与上游 [picturereader](https://github.com/jing-hy/picturereader)（MIT；作者 @jing-hy，感谢上游作者与社区）做了共存协作优化。本插件保持**完全独立**：**不安装 picturereader 时功能与旧版完全一致**；所有协作探测失败都会安全回退（自动当作"未安装"）；双方互不修改、互不占用——picturereader 的代码、配置与文件均不被本插件改动。
 
 # vision-exp-tile ◆ 为 deepseek-v4-flash-vision-exp 定制的大图智能识图插件
 
