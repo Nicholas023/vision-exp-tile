@@ -1,3 +1,5 @@
+> ⚠️ Moved to **[Nicholaskin/vision-exp-tile](https://github.com/Nicholaskin/vision-exp-tile)** — this repository is no longer maintained. 本仓库已迁移，后续更新请到新仓库。
+
 ## 写在前面
 
 这个插件是我用 **DeepSeek Harness** 写的——我本人没有写代码相关的知识，这个插件只是提供一个思路，外加自用。
